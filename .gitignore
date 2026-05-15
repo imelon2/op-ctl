@@ -1,0 +1,40 @@
+# Built binary (from `make build`)
+/op-ctl
+
+# Go toolchain artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Coverage / profiling
+coverage.out
+coverage.html
+*.prof
+
+# Operator's working TOML configs. Sanitized templates live in
+# config.example/ and are committed; the chain-specific files under
+# config/ typically reference real bastion hosts and identity_file
+# paths to private keys, so they stay local.
+/config/
+
+# Runtime output of `op-ctl namespace` (per-backend JSON written into
+# ./namespace by default).
+/namespace/
+
+# OMC tooling state (Ralph PRDs, session caches, plans, progress).
+.omc/
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Local env files
+.env
+.env.local

@@ -1,0 +1,33 @@
+[global]
+namespace_timeout = "30s"
+namespace_retry   = 3
+# L2 block production time. Used by `op-ctl status block` to translate
+# L2 lag block counts into human-readable durations. Defaults to 2s
+# (op-stack default) when unset.
+l2_block_time = "1s"
+
+[backends]
+# A map of backends by name.
+[backends.sequencer-1]
+consensus_rpc_url = "http://127.0.0.1:9545"
+execution_rpc_url = "http://127.0.0.1:8545"
+
+[backends.sequencer-2]
+consensus_rpc_url = "http://127.0.0.1:9545"
+execution_rpc_url = "http://127.0.0.1:8545"
+
+[backends.ingress-1]
+consensus_rpc_url = "http://127.0.0.1:9545"
+execution_rpc_url = "http://127.0.0.1:8545"
+
+[backends.ingress-2]
+consensus_rpc_url = "http://127.0.0.1:9545"
+execution_rpc_url = "http://127.0.0.1:8545"
+
+[backends.full-node]
+consensus_rpc_url = "http://127.0.0.1:9545"
+execution_rpc_url = "http://127.0.0.1:8545"
+
+[backends.archive-node]
+consensus_rpc_url = "http://127.0.0.1:9545"
+execution_rpc_url = "http://127.0.0.1:8545"
