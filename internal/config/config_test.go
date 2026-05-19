@@ -858,6 +858,68 @@ refresh = "nope"
 	}
 }
 
+func TestLoad_RPCAndContracts_RelativeStateRoot(t *testing.T) {
+	p := writeTemp(t, "config.toml", `
+[rpc]
+l1_rpc_url = "https://ethereum-sepolia-rpc.publicnode.com"
+
+[contracts]
+state_root = "state.json"
+
+[backends.sequencer]
+consensus_rpc_url = "http://a:1"
+`)
+	c, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got, want := c.RPC.L1RPCURL, "https://ethereum-sepolia-rpc.publicnode.com"; got != want {
+		t.Errorf("RPC.L1RPCURL: got %q, want %q", got, want)
+	}
+	// Relative state_root is resolved against the directory of the config
+	// file (not the cwd), so the operator can invoke op-ctl from anywhere
+	// without the JSON path going stale.
+	wantStateRoot := filepath.Join(filepath.Dir(p), "state.json")
+	if c.Contracts.StateRoot != wantStateRoot {
+		t.Errorf("Contracts.StateRoot: got %q, want %q", c.Contracts.StateRoot, wantStateRoot)
+	}
+}
+
+func TestLoad_ContractsStateRootAbsolute_Preserved(t *testing.T) {
+	abs := "/abs/path/to/state.json"
+	p := writeTemp(t, "config.toml", `
+[contracts]
+state_root = "`+abs+`"
+
+[backends.sequencer]
+consensus_rpc_url = "http://a:1"
+`)
+	c, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.Contracts.StateRoot != abs {
+		t.Errorf("absolute StateRoot should be preserved: got %q, want %q", c.Contracts.StateRoot, abs)
+	}
+}
+
+func TestLoad_RPCAndContracts_AbsentLeavesZero(t *testing.T) {
+	p := writeTemp(t, "config.toml", `
+[backends.sequencer]
+consensus_rpc_url = "http://a:1"
+`)
+	c, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.RPC.L1RPCURL != "" {
+		t.Errorf("absent l1_rpc_url should leave empty string, got %q", c.RPC.L1RPCURL)
+	}
+	if c.Contracts.StateRoot != "" {
+		t.Errorf("absent state_root should leave empty string, got %q", c.Contracts.StateRoot)
+	}
+}
+
 func TestLoad_NestedBackendKey(t *testing.T) {
 	// Nested table under a backend should not produce a duplicate entry.
 	p := writeTemp(t, "config.toml", `

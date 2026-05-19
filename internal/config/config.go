@@ -87,13 +87,33 @@ type Bastion struct {
 // is the source of truth for BackendList() — the Backends map alone is
 // unordered.
 type Config struct {
-	Global   GlobalConfig       `toml:"global"`
-	Backends map[string]Backend `toml:"backends"`
-	Bastions map[string]Bastion `toml:"bastions"`
-	State    StateConfig        `toml:"state"`
+	Global    GlobalConfig       `toml:"global"`
+	RPC       RPCConfig          `toml:"rpc"`
+	Contracts ContractsConfig    `toml:"contracts"`
+	Backends  map[string]Backend `toml:"backends"`
+	Bastions  map[string]Bastion `toml:"bastions"`
+	State     StateConfig        `toml:"state"`
 
 	keyOrder []string
 	path     string
+}
+
+// RPCConfig holds L1-side RPC endpoint(s) op-ctl reads from.
+// op-ctl is L2-paychain centric so this is strictly read-only L1 access
+// (no signing keys, no transaction submission) — consumed by the
+// `op-ctl read` subcommands that call view methods on settlement-layer
+// contracts (DisputeGameFactoryProxy, OptimismPortalProxy, ...).
+type RPCConfig struct {
+	L1RPCURL string `toml:"l1_rpc_url"`
+}
+
+// ContractsConfig points at the on-disk state.json (op-deployer output)
+// that lists this chain's deployed L1 contract addresses. The path is
+// resolved relative to the directory of the loading config.toml when not
+// absolute, so an operator can write `./config/state.json` regardless
+// of the cwd op-ctl was invoked from.
+type ContractsConfig struct {
+	StateRoot string `toml:"state_root"`
 }
 
 // GlobalConfig holds process-wide defaults under the [global] TOML
@@ -326,6 +346,20 @@ func Load(path string) (*Config, error) {
 			)
 		}
 		c.State.TxPool.Interval = d
+	}
+
+	// state_root is resolved relative to the *config file's* directory
+	// when written as a relative path. This makes the path stable
+	// regardless of the cwd op-ctl is invoked from — operators expect
+	// their config to load the same way whether they run `./op-ctl`
+	// from the project root, from another directory via absolute
+	// path, or via a shell alias.
+	//
+	// Absolute paths are passed through verbatim. ~/... is not expanded
+	// here; if operators need home-relative paths they should use the
+	// shell's expansion before storing in config.
+	if raw := strings.TrimSpace(c.Contracts.StateRoot); raw != "" && !filepath.IsAbs(raw) {
+		c.Contracts.StateRoot = filepath.Join(filepath.Dir(path), raw)
 	}
 
 	// state.txpool.detail.refresh:
