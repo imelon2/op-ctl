@@ -209,6 +209,7 @@ func init() {
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(p2pCmd)
 	rootCmd.AddCommand(stateCmd)
+	rootCmd.AddCommand(readCmd)
 }
 
 func main() {

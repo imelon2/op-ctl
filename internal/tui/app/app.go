@@ -26,6 +26,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"op-ctl/internal/config"
+	"op-ctl/internal/contracts"
 	"op-ctl/internal/elnode"
 	"op-ctl/internal/namespace"
 	"op-ctl/internal/opnode"
@@ -289,6 +290,19 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.handleTxDetail(m)
 	case configSelectedMsg:
 		return a.handleConfigSelected(m)
+	case readGameSelectedMsg:
+		// Push the per-game detail screen seeded with the L1 RPC URL
+		// (carried on App) + the address the list screen highlighted.
+		if a.cfg == nil || a.cfg.RPC.L1RPCURL == "" {
+			return a.push(newErrScreen("config: [rpc].l1_rpc_url is not set")), nil
+		}
+		timeout := a.timeout
+		if timeout <= 0 {
+			timeout = 10 * time.Second
+		}
+		screen := newReadDisputeGameDetailScreen(a.cfg.RPC.L1RPCURL, m.address, timeout)
+		a = a.push(screen)
+		return a, screen.Init()
 	}
 
 	if len(a.stack) == 0 {
@@ -405,6 +419,25 @@ func (a App) handleCmdSelected(name string) (App, tea.Cmd) {
 			timeout = a.timeout
 		}
 		screen := newStateBlockScreen(bs, a.resolver, interval, timeout, a.cfg.Global.L2BlockTime)
+		a = a.push(screen)
+		return a, screen.Init()
+	case "dispute-game":
+		// Disambiguate by parent: `dispute-game` only belongs under `read`.
+		if target.Parent() == nil || target.Parent().Name() != "read" {
+			return a, nil
+		}
+		if a.cfg.RPC.L1RPCURL == "" {
+			return a.push(newErrScreen("config: [rpc].l1_rpc_url is not set")), nil
+		}
+		addrs, err := contracts.Load(a.cfg.Contracts.StateRoot)
+		if err != nil {
+			return a.push(newErrScreen(err.Error())), nil
+		}
+		timeout := a.timeout
+		if timeout <= 0 {
+			timeout = 10 * time.Second
+		}
+		screen := newReadDisputeGameScreen(a.cfg.RPC.L1RPCURL, addrs.DisputeGameFactoryProxy, timeout)
 		a = a.push(screen)
 		return a, screen.Init()
 	case "txpool":
