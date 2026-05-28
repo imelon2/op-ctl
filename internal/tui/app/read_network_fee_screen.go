@@ -177,7 +177,50 @@ type readNetworkFeeScreen struct {
 	// the operator's place.
 	offset int
 
+	// unit controls how the Live section's wei amounts (Gas Oracle +
+	// FeeVaults) are rendered; cycled with 'u'. Config values are not
+	// affected (they are scalars/counts, not wei).
+	unit feeUnit
+
 	width, height int
+}
+
+// feeUnit selects the display unit for wei-denominated values in the
+// Live section. The zero value is wei, so a freshly pushed screen shows
+// raw wei until the operator presses 'u'.
+type feeUnit int
+
+const (
+	unitWei feeUnit = iota
+	unitGwei
+	unitEth
+)
+
+func (u feeUnit) String() string {
+	switch u {
+	case unitGwei:
+		return "gwei"
+	case unitEth:
+		return "eth"
+	default:
+		return "wei"
+	}
+}
+
+// next cycles wei → gwei → eth → wei.
+func (u feeUnit) next() feeUnit { return (u + 1) % 3 }
+
+// decimals is how many places to shift the wei value right for this
+// unit (0 = wei, 9 = gwei, 18 = eth).
+func (u feeUnit) decimals() int {
+	switch u {
+	case unitGwei:
+		return 9
+	case unitEth:
+		return 18
+	default:
+		return 0
+	}
 }
 
 func newReadNetworkFeeScreen(l1RPCURL, l2RPCURL, systemConfigAddr string, timeout time.Duration) readNetworkFeeScreen {
@@ -367,6 +410,10 @@ func (s readNetworkFeeScreen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return s, func() tea.Msg { return popMsg{} }
 		case "ctrl+c":
 			return s, tea.Quit
+		case "u":
+			// Cycle the Live section's display unit: wei → gwei → eth.
+			s.unit = s.unit.next()
+			return s, nil
 		case "j", "down":
 			s.offset++
 			return s.clampOffset(), nil
@@ -447,7 +494,7 @@ func (s readNetworkFeeScreen) renderBody() string {
 
 func (s readNetworkFeeScreen) View() string {
 	header := s.renderHeader()
-	footer := theme.Footer(theme.KeyScroll, theme.KeyTopBottom, theme.KeyRefresh, theme.KeyBack) +
+	footer := theme.Footer(theme.KeyScroll, theme.KeyTopBottom, theme.Key{Keys: "u", Desc: "unit"}, theme.KeyRefresh, theme.KeyBack) +
 		theme.Help.Render(fmt.Sprintf(" · auto %s", vaultRefreshInterval))
 	body := s.renderBody()
 
@@ -526,7 +573,11 @@ func (s readNetworkFeeScreen) renderLiveSection() string {
 	divider := lipgloss.NewStyle().Foreground(theme.ColorDim).Render(strings.Join(bars, "\n"))
 
 	row := lipgloss.JoinHorizontal(lipgloss.Top, gasOracle, "  ", divider, "  ", feeVaults)
-	return theme.Title.Render("Live") + "\n" + row
+	// Banner carries the active display unit (the Gas Oracle / FeeVaults
+	// amounts below honor it) plus the 'u' cycle hint.
+	banner := theme.Title.Render("Live") +
+		theme.Subtitle.Render(fmt.Sprintf("    unit: %s  ·  u to cycle (wei/gwei/eth)", s.unit))
+	return banner + "\n" + row
 }
 
 // renderGasOracleSection is the Live "Gas Oracle" group: the GasPrice
@@ -556,13 +607,13 @@ func (s readNetworkFeeScreen) renderGasOracleSection() string {
 	case s.gas == nil:
 		b.WriteString(rnfIndentLine(4, theme.ErrText.Render("ERR no data")))
 	default:
-		b.WriteString(rnfBigRow(4, "maxPriorityFeePerGas", s.gas.MaxPriorityFee, s.gas.Errors["maxPriorityFee"]))
+		b.WriteString(s.rnfBigRow(4, "maxPriorityFeePerGas", s.gas.MaxPriorityFee, s.gas.Errors["maxPriorityFee"]))
 		// baseFee = gasPrice - maxPriorityFeePerGas; only meaningful when
 		// both inputs succeeded.
 		if s.gas.Errors["gasPrice"] != nil || s.gas.Errors["maxPriorityFee"] != nil {
 			b.WriteString(rnfErrRow(4, "baseFee", fmt.Errorf("needs gasPrice and maxPriorityFeePerGas")))
 		} else {
-			b.WriteString(rnfBigRow(4, "baseFee", s.gas.BaseFee, nil))
+			b.WriteString(s.rnfBigRow(4, "baseFee", s.gas.BaseFee, nil))
 		}
 	}
 
@@ -577,8 +628,8 @@ func (s readNetworkFeeScreen) renderGasOracleSection() string {
 	case s.l1fee == nil:
 		b.WriteString(rnfIndentLine(4, theme.ErrText.Render("ERR no data")))
 	default:
-		b.WriteString(rnfBigRow(4, "l1BaseFee", s.l1fee.L1BaseFee, s.l1fee.Errors["l1BaseFee"]))
-		b.WriteString(rnfBigRow(4, "blobBaseFee", s.l1fee.BlobBaseFee, s.l1fee.Errors["blobBaseFee"]))
+		b.WriteString(s.rnfBigRow(4, "l1BaseFee", s.l1fee.L1BaseFee, s.l1fee.Errors["l1BaseFee"]))
+		b.WriteString(s.rnfBigRow(4, "blobBaseFee", s.l1fee.BlobBaseFee, s.l1fee.Errors["blobBaseFee"]))
 	}
 	return b.String()
 }
@@ -590,15 +641,16 @@ func rnfIndentLine(indent int, s string) string {
 
 // rnfBigRow / rnfErrRow are indent-aware label/value rows for the nested
 // Live sub-blocks (the flat Config rows use the indent-2 format*Row
-// helpers below).
-func rnfBigRow(indent int, label string, v *big.Int, e error) string {
+// helpers below). rnfBigRow is a method so the value honors the active
+// display unit (wei / gwei / eth).
+func (s readNetworkFeeScreen) rnfBigRow(indent int, label string, v *big.Int, e error) string {
 	if e != nil {
 		return rnfErrRow(indent, label, e)
 	}
 	return fmt.Sprintf("%s%s  %s\n",
 		strings.Repeat(" ", indent),
 		theme.Label.Render(padLabel(label)),
-		theme.Value.Render(bigOrZero(v)),
+		theme.Value.Render(s.formatFee(v)),
 	)
 }
 
@@ -608,6 +660,51 @@ func rnfErrRow(indent int, label string, e error) string {
 		theme.Label.Render(padLabel(label)),
 		theme.ErrText.Render(fmt.Sprintf("ERR %v", e)),
 	)
+}
+
+// formatFee renders a wei value in the screen's active unit. wei is the
+// raw integer; gwei/eth shift the decimal point and trim trailing zeros.
+func (s readNetworkFeeScreen) formatFee(v *big.Int) string {
+	if v == nil {
+		return "0"
+	}
+	d := s.unit.decimals()
+	if d == 0 {
+		return v.String()
+	}
+	return scaleDecimal(v, d)
+}
+
+// feeOrErr is the FeeVaults-table value formatter: the unit-aware amount,
+// or an "ERR(...)" cell when the underlying read failed.
+func (s readNetworkFeeScreen) feeOrErr(v *big.Int, e error) string {
+	if e != nil {
+		return fmt.Sprintf("ERR(%v)", e)
+	}
+	return s.formatFee(v)
+}
+
+// scaleDecimal divides v by 10^decimals and renders the quotient with a
+// trailing-zero-trimmed fractional part (e.g. 1_000_000 wei at 9 →
+// "0.001"). Sign-aware, though Live fee values are non-negative.
+func scaleDecimal(v *big.Int, decimals int) string {
+	abs := new(big.Int).Abs(v)
+	div := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(decimals)), nil)
+	q := new(big.Int)
+	r := new(big.Int)
+	q.QuoRem(abs, div, r)
+	out := q.String()
+	if r.Sign() != 0 {
+		frac := r.String()
+		if pad := decimals - len(frac); pad > 0 {
+			frac = strings.Repeat("0", pad) + frac
+		}
+		out += "." + strings.TrimRight(frac, "0")
+	}
+	if v.Sign() < 0 {
+		out = "-" + out
+	}
+	return out
 }
 
 func (s readNetworkFeeScreen) renderVaultsSection() string {
@@ -635,13 +732,13 @@ func (s readNetworkFeeScreen) renderVaultsSection() string {
 // Column widths for the vaults section. Chosen so the longest vault
 // name ("SequencerFeeVault" = 17) fits in the label column and the
 // 20-byte hex address fits without truncation. Balance/totalProcessed
-// widths are sized for typical wei values seen on this chain (<= 14
-// digits); larger values overflow into the next column rather than
-// being truncated — preferable to silently dropping precision.
+// widths leave room for the decimal form the gwei/eth units produce
+// (e.g. a 15-digit wei balance becomes "0.000123456789012345"); larger
+// values overflow into the next column rather than being truncated.
 const (
 	rnfVaultNameWidth      = 20
-	rnfVaultBalanceWidth   = 16
-	rnfVaultTotalProcWidth = 16
+	rnfVaultBalanceWidth   = 24
+	rnfVaultTotalProcWidth = 24
 )
 
 // renderVaultsTable lays the 4 vault rows out as plain aligned text
@@ -662,8 +759,8 @@ func (s readNetworkFeeScreen) renderVaultsTable() string {
 	b.WriteString("\n")
 
 	for _, v := range s.vaults {
-		bal := bigStrOrErrStr(v.Balance, v.Errors["balance"])
-		tp := bigStrOrErrStr(v.TotalProcessed, v.Errors["totalProcessed"])
+		bal := s.feeOrErr(v.Balance, v.Errors["balance"])
+		tp := s.feeOrErr(v.TotalProcessed, v.Errors["totalProcessed"])
 		b.WriteString("  ")
 		b.WriteString(theme.Label.Render(rnfPadRight(v.Name, rnfVaultNameWidth)))
 		b.WriteString("  ")
@@ -904,16 +1001,6 @@ func padLabel(label string) string {
 }
 
 func bigOrZero(n *big.Int) string {
-	if n == nil {
-		return "0"
-	}
-	return n.String()
-}
-
-func bigStrOrErrStr(n *big.Int, e error) string {
-	if e != nil {
-		return fmt.Sprintf("ERR(%v)", e)
-	}
 	if n == nil {
 		return "0"
 	}
