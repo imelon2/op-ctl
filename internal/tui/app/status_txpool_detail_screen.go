@@ -214,6 +214,9 @@ var (
 	txdQueuedFlag    = lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true)
 )
 
+// Minimum column widths. Actual widths are computed per render so that
+// long values (e.g. full wei integers) don't push later columns out of
+// alignment — padTrunc only pads, it doesn't truncate.
 const (
 	txdFromW  = 12
 	txdNonceW = 6
@@ -274,32 +277,62 @@ func (s statusTxPoolDetailScreen) View() string {
 		return b.String()
 	}
 
+	// Pre-render each cell once and grow column widths to fit, so a
+	// long value (e.g. full wei integer) doesn't shift later columns.
+	type rowCells struct{ from, nonce, to, value, gas string }
+	cells := make([]rowCells, len(s.txs))
+	fromW, nonceW, toW, valueW, gasW := txdFromW, txdNonceW, txdToW, txdValueW, txdGasW
+	for i, tx := range s.txs {
+		cells[i] = rowCells{
+			from:  shrinkID(tx.From, txdFromW),
+			nonce: fmt.Sprintf("%d", tx.Nonce),
+			to:    shrinkID(tx.To, txdToW),
+			value: formatValue(tx.Value),
+			gas:   fmt.Sprintf("%d", tx.Gas),
+		}
+		if w := lipgloss.Width(cells[i].from); w > fromW {
+			fromW = w
+		}
+		if w := lipgloss.Width(cells[i].nonce); w > nonceW {
+			nonceW = w
+		}
+		if w := lipgloss.Width(cells[i].to); w > toW {
+			toW = w
+		}
+		if w := lipgloss.Width(cells[i].value); w > valueW {
+			valueW = w
+		}
+		if w := lipgloss.Width(cells[i].gas); w > gasW {
+			gasW = w
+		}
+	}
+
 	// Header.
 	b.WriteString("    ")
-	b.WriteString(padTrunc(txdLabelStyle.Render("from"), txdFromW))
+	b.WriteString(padTrunc(txdLabelStyle.Render("from"), fromW))
 	b.WriteString("  ")
-	b.WriteString(padTrunc(txdLabelStyle.Render("nonce"), txdNonceW))
+	b.WriteString(padTrunc(txdLabelStyle.Render("nonce"), nonceW))
 	b.WriteString("  ")
-	b.WriteString(padTrunc(txdLabelStyle.Render("to"), txdToW))
+	b.WriteString(padTrunc(txdLabelStyle.Render("to"), toW))
 	b.WriteString("  ")
-	b.WriteString(padTrunc(txdLabelStyle.Render("value"), txdValueW))
+	b.WriteString(padTrunc(txdLabelStyle.Render("value"), valueW))
 	b.WriteString("  ")
-	b.WriteString(padTrunc(txdLabelStyle.Render("gas"), txdGasW))
+	b.WriteString(padTrunc(txdLabelStyle.Render("gas"), gasW))
 	b.WriteString("  ")
 	b.WriteString(txdLabelStyle.Render("p/q"))
 	b.WriteString("\n")
 
 	for i, tx := range s.txs {
 		var row strings.Builder
-		row.WriteString(padTrunc(txdValueStyle.Render(shrinkID(tx.From, txdFromW)), txdFromW))
+		row.WriteString(padTrunc(txdValueStyle.Render(cells[i].from), fromW))
 		row.WriteString("  ")
-		row.WriteString(padTrunc(txdValueStyle.Render(fmt.Sprintf("%d", tx.Nonce)), txdNonceW))
+		row.WriteString(padTrunc(txdValueStyle.Render(cells[i].nonce), nonceW))
 		row.WriteString("  ")
-		row.WriteString(padTrunc(txdValueStyle.Render(shrinkID(tx.To, txdToW)), txdToW))
+		row.WriteString(padTrunc(txdValueStyle.Render(cells[i].to), toW))
 		row.WriteString("  ")
-		row.WriteString(padTrunc(txdValueStyle.Render(formatValue(tx.Value)), txdValueW))
+		row.WriteString(padTrunc(txdValueStyle.Render(cells[i].value), valueW))
 		row.WriteString("  ")
-		row.WriteString(padTrunc(txdValueStyle.Render(fmt.Sprintf("%d", tx.Gas)), txdGasW))
+		row.WriteString(padTrunc(txdValueStyle.Render(cells[i].gas), gasW))
 		row.WriteString("  ")
 		if tx.Pending {
 			row.WriteString(txdPendingFlag.Render("P"))

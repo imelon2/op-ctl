@@ -862,6 +862,7 @@ func TestLoad_RPCAndContracts_RelativeStateRoot(t *testing.T) {
 	p := writeTemp(t, "config.toml", `
 [rpc]
 l1_rpc_url = "https://ethereum-sepolia-rpc.publicnode.com"
+l2_rpc_url = "http://3.39.212.0:8545"
 
 [contracts]
 state_root = "state.json"
@@ -875,6 +876,9 @@ consensus_rpc_url = "http://a:1"
 	}
 	if got, want := c.RPC.L1RPCURL, "https://ethereum-sepolia-rpc.publicnode.com"; got != want {
 		t.Errorf("RPC.L1RPCURL: got %q, want %q", got, want)
+	}
+	if got, want := c.RPC.L2RPCURL, "http://3.39.212.0:8545"; got != want {
+		t.Errorf("RPC.L2RPCURL: got %q, want %q", got, want)
 	}
 	// Relative state_root is resolved against the directory of the config
 	// file (not the cwd), so the operator can invoke op-ctl from anywhere
@@ -914,6 +918,9 @@ consensus_rpc_url = "http://a:1"
 	}
 	if c.RPC.L1RPCURL != "" {
 		t.Errorf("absent l1_rpc_url should leave empty string, got %q", c.RPC.L1RPCURL)
+	}
+	if c.RPC.L2RPCURL != "" {
+		t.Errorf("absent l2_rpc_url should leave empty string, got %q", c.RPC.L2RPCURL)
 	}
 	if c.Contracts.StateRoot != "" {
 		t.Errorf("absent state_root should leave empty string, got %q", c.Contracts.StateRoot)

@@ -69,9 +69,35 @@ type readDisputeGameDetailScreen struct {
 	claimsHardErr error
 	claimsLatency time.Duration
 
-	offset        int
+	// Right-pane (Claim Data list) state. cursor is the highlighted
+	// claim index; expanded[i] toggles between the compact one-line
+	// row and the multi-line per-field block for claim i. Survives
+	// across refreshes so the operator does not lose their context
+	// after pressing `r`.
+	cursor   int
+	expanded map[uint64]bool
+
+	// Independent scroll offsets per pane: left scrolls the static
+	// sections, right scrolls the (possibly much longer when claims
+	// are expanded) claim list. ← / → switch which pane responds to
+	// j/k/g/G/PgDn/PgUp.
+	focus       detailPane
+	leftOffset  int
+	rightOffset int
+
 	width, height int
 }
+
+// detailPane names the two-column layout's active scroll target.
+// paneRight is the default focus on first paint because the claim
+// list is where most operator interaction lives; ← flips to paneLeft
+// so they can browse the static sections at length.
+type detailPane int
+
+const (
+	paneRight detailPane = iota
+	paneLeft
+)
 
 func newReadDisputeGameDetailScreen(l1RPCURL, gameAddr string, timeout time.Duration) readDisputeGameDetailScreen {
 	return readDisputeGameDetailScreen{
@@ -79,6 +105,7 @@ func newReadDisputeGameDetailScreen(l1RPCURL, gameAddr string, timeout time.Dura
 		gameAddr: gameAddr,
 		timeout:  timeout,
 		loading:  true,
+		expanded: map[uint64]bool{},
 	}
 }
 
@@ -147,25 +174,88 @@ func (s readDisputeGameDetailScreen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		s.claimsLatency = m.latency
 		return s, nil
 	case tea.KeyMsg:
-		switch m.String() {
+		k := m.String()
+		switch k {
 		case "q", "esc", "ctrl+c":
 			return s, func() tea.Msg { return popMsg{} }
+		case "left", "h":
+			s.focus = paneLeft
+		case "right", "l":
+			s.focus = paneRight
+		case "tab":
+			// Single-key toggle for operators who prefer not to reach
+			// for the arrow keys.
+			if s.focus == paneLeft {
+				s.focus = paneRight
+			} else {
+				s.focus = paneLeft
+			}
 		case "j", "down":
-			s.offset++
+			if s.focus == paneLeft {
+				s.leftOffset++
+				s = s.clampLeftOffset()
+			} else {
+				if s.cursor < len(s.claims)-1 {
+					s.cursor++
+				}
+				s = s.ensureCursorVisible()
+			}
 		case "k", "up":
-			s.offset--
+			if s.focus == paneLeft {
+				s.leftOffset--
+				s = s.clampLeftOffset()
+			} else {
+				if s.cursor > 0 {
+					s.cursor--
+				}
+				s = s.ensureCursorVisible()
+			}
 		case "g", "home":
-			s.offset = 0
+			if s.focus == paneLeft {
+				s.leftOffset = 0
+			} else {
+				s.cursor = 0
+				s.rightOffset = 0
+			}
 		case "G", "end":
-			s.offset = 1 << 30
-		case "pgdown", "ctrl+d", " ":
-			s.offset += halfPage(s.height)
+			if s.focus == paneLeft {
+				s.leftOffset = 1 << 30
+				s = s.clampLeftOffset()
+			} else {
+				if len(s.claims) > 0 {
+					s.cursor = len(s.claims) - 1
+				}
+				s = s.ensureCursorVisible()
+			}
+		case "pgdown", "ctrl+d":
+			if s.focus == paneLeft {
+				s.leftOffset += halfPage(s.height)
+				s = s.clampLeftOffset()
+			} else {
+				s.rightOffset += halfPage(s.height)
+				s = s.clampRightOffset()
+			}
 		case "pgup", "ctrl+u", "b":
-			s.offset -= halfPage(s.height)
+			if s.focus == paneLeft {
+				s.leftOffset -= halfPage(s.height)
+				s = s.clampLeftOffset()
+			} else {
+				s.rightOffset -= halfPage(s.height)
+				s = s.clampRightOffset()
+			}
+		case "enter", " ":
+			// Toggle the highlighted claim only when focus is on the
+			// right pane — keeps left-pane scrolling pure.
+			if s.focus == paneRight && s.cursor >= 0 && s.cursor < len(s.claims) {
+				idx := s.claims[s.cursor].Index
+				if s.expanded == nil {
+					s.expanded = map[uint64]bool{}
+				}
+				s.expanded[idx] = !s.expanded[idx]
+				s = s.ensureCursorVisible()
+			}
 		case "r":
 			if !s.loading {
-				// Reset both phases so stale rows from the prior fetch
-				// don't visually shadow the in-flight one.
 				s.loading = true
 				s.claimsLoading = false
 				s.claims = nil
@@ -174,105 +264,379 @@ func (s readDisputeGameDetailScreen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return s, fetchReadDGDetailCmd(s.l1RPCURL, s.gameAddr, s.timeout, s.gen+1)
 			}
 		}
-		// Clamp offset immediately so repeated keypresses past the
-		// boundary do not accumulate — without this, holding `j` at
-		// the bottom inflates s.offset arbitrarily and the operator
-		// has to press `k` the same number of times before the view
-		// starts moving.
-		s = s.clampOffset()
 	}
 	return s, nil
 }
 
-// clampOffset constrains s.offset to [0, maxOff] given the current
-// body height and viewport. Called from Update after any keystroke
-// that moves the scroll position; View() still runs the same clamp
-// defensively (snapshot may grow / shrink between Update and View
-// when content is dynamic).
-func (s readDisputeGameDetailScreen) clampOffset() readDisputeGameDetailScreen {
-	bodyLines := strings.Count(s.renderBody(), "\n") + 1
-	avail := s.height - 5
-	if avail < 1 {
-		avail = 1
-	}
-	maxOff := bodyLines - avail
-	if maxOff < 0 {
-		maxOff = 0
-	}
-	if s.offset > maxOff {
-		s.offset = maxOff
-	}
-	if s.offset < 0 {
-		s.offset = 0
-	}
+// clampLeftOffset / clampRightOffset constrain the per-pane scroll
+// offsets to [0, maxOff] where maxOff = paneLines - viewport. They're
+// called from Update after any keystroke that moves the relevant
+// offset so repeated keypresses at the bounds don't accumulate.
+func (s readDisputeGameDetailScreen) clampLeftOffset() readDisputeGameDetailScreen {
+	left := s.renderLeftPanel()
+	leftH := strings.Count(left, "\n") + 1
+	s.leftOffset = clampInt(s.leftOffset, 0, max0(leftH-s.viewportHeight()))
 	return s
+}
+
+func (s readDisputeGameDetailScreen) clampRightOffset() readDisputeGameDetailScreen {
+	right, _ := s.renderRightPanel()
+	rightH := strings.Count(right, "\n") + 1
+	s.rightOffset = clampInt(s.rightOffset, 0, max0(rightH-s.viewportHeight()))
+	return s
+}
+
+// viewportHeight is the per-pane vertical space available for body
+// rows. With the L1↔summary divider added and the in-pane tab row
+// removed, the reserved chrome adds up to 10 lines:
+//
+//	 1. title / breadcrumb
+//	 2. L1 URL
+//	 3. ─── divider
+//	 4. version · l2ChainId · gameType
+//	 5. absolutePrestate
+//	 6. status · createdAt · resolvedAt
+//	 7. blank separator
+//	 8. pane top border
+//	 9. pane bottom border
+//	10. footer
+//
+// View() uses the returned value directly as the body slice length —
+// no extra subtraction because the panes no longer carry an internal
+// tab row.
+func (s readDisputeGameDetailScreen) viewportHeight() int {
+	h := s.height - 10
+	if h < 1 {
+		return 1
+	}
+	return h
 }
 
 // --- styles ---
 
 var (
-	rdgDetailTitleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	rdgDetailContextStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	rdgDetailSectionStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	rdgDetailLabelStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	rdgDetailValueStyle    = lipgloss.NewStyle()
-	rdgDetailErrStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9"))
-	rdgDetailStatusInProg  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("11")) // yellow
-	rdgDetailStatusChall   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9"))  // red
-	rdgDetailStatusDef     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("10")) // green
-	rdgDetailHelpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
+	rdgDetailTitleStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
+	rdgDetailContextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	rdgDetailSectionStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
+	rdgDetailLabelStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	rdgDetailValueStyle   = lipgloss.NewStyle()
+	rdgDetailErrStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9"))
+	rdgDetailStatusInProg = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("11")) // yellow
+	rdgDetailStatusChall  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9"))  // red
+	rdgDetailStatusDef    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("10")) // green
+	rdgDetailHelpStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
+
+	// Both panes get a 4-sided NormalBorder; only BorderForeground
+	// changes between focused and idle states (set per-render in
+	// View). Inner Padding(0,1) keeps content from sitting flush
+	// against the border.
+	rdgDetailPaneBaseStyle = lipgloss.NewStyle().
+				BorderStyle(lipgloss.NormalBorder()).
+				BorderForeground(lipgloss.Color("240")).
+				Padding(0, 1)
+
+	// Active-pane border color — the only visual cue for focus now
+	// that the tab markers are gone. Bright cyan (12) is the same
+	// hue used for selected list rows so the operator can build a
+	// consistent "this is interactive" vocabulary across screens.
+	rdgDetailPaneActiveBorderColor = lipgloss.Color("12")
+	rdgDetailPaneIdleBorderColor   = lipgloss.Color("240")
 )
+
+// minLeftPanelWidth is the floor used before the first window-size
+// message arrives (or as a sanity guard against zero-width content).
+// The actual width is computed per render from the longest visible
+// line on the left, so bytes32 hashes and long Solidity labels stay
+// fully visible.
+const minLeftPanelWidth = 30
 
 func (s readDisputeGameDetailScreen) View() string {
 	var b strings.Builder
 	b.WriteString(rdgDetailTitleStyle.Render(fmt.Sprintf("read / dispute-game / %s", s.gameAddr)))
 	b.WriteString("\n")
 	b.WriteString(rdgDetailContextStyle.Render(fmt.Sprintf("L1: %s", s.l1RPCURL)))
+	b.WriteString("\n")
+	b.WriteString(s.renderHeaderDivider())
+	b.WriteString("\n")
+	b.WriteString(s.renderHeaderSummary())
+	b.WriteString("\n")
+	b.WriteString(s.renderHeaderPrestate())
+	b.WriteString("\n")
+	b.WriteString(s.renderHeaderStatus())
 	b.WriteString("\n\n")
 
-	body := s.renderBody()
-	footer := rdgDetailHelpStyle.Render("j/k ↑↓ scroll · g/G top/bottom · PgDn/PgUp · r refresh · q back")
-
-	// Scroll-window the body, but always show header + footer.
-	if s.width > 0 && s.height > 0 {
-		bodyLines := strings.Split(body, "\n")
-		// 4 lines reserved for title+context+blank+footer (~4)
-		avail := s.height - 5
-		if avail < 1 {
-			avail = 1
-		}
-		maxOff := len(bodyLines) - avail
-		if maxOff < 0 {
-			maxOff = 0
-		}
-		off := s.offset
-		if off > maxOff {
-			off = maxOff
-		}
-		if off < 0 {
-			off = 0
-		}
-		end := off + avail
-		if end > len(bodyLines) {
-			end = len(bodyLines)
-		}
-		visible := bodyLines[off:end]
-		for len(visible) < avail {
-			visible = append(visible, "")
-		}
-		b.WriteString(strings.Join(visible, "\n"))
-		b.WriteString("\n")
-	} else {
-		b.WriteString(body)
-		b.WriteString("\n")
+	// Footer announces the focused pane so the operator never wonders
+	// which side ← / → / j / k / PgDn are acting on.
+	focusLabel := "right"
+	if s.focus == paneLeft {
+		focusLabel = "left"
 	}
+	footer := rdgDetailHelpStyle.Render(
+		fmt.Sprintf("focus: %s · ← → switch · j/k ↑↓ scroll · ⏎/space toggle (right) · g/G first/last · PgDn/PgUp · r refresh · q back", focusLabel),
+	)
+
+	// Each pane scrolls independently via its own offset. Panes carry
+	// no internal tab/title row anymore — focus is communicated by
+	// the surrounding border color alone, and section titles inside
+	// each pane (Roles, Output Root Claim, Anchor, Parameters on the
+	// left; Claim Data on the right) carry the labelling job.
+	leftLines, rightLines := s.buildPanelLines()
+	avail := s.viewportHeight()
+
+	leftSlice := sliceWithPad(leftLines, s.leftOffset, avail)
+	rightSlice := sliceWithPad(rightLines, s.rightOffset, avail)
+
+	// Both panes are 4-sided bordered cells. Active pane's border
+	// glows in the bright accent color; idle pane stays muted.
+	leftW := leftPaneWidth(leftLines)
+	leftStyle := rdgDetailPaneBaseStyle.Width(leftW)
+	rightStyle := rdgDetailPaneBaseStyle
+	if s.focus == paneLeft {
+		leftStyle = leftStyle.BorderForeground(rdgDetailPaneActiveBorderColor)
+		rightStyle = rightStyle.BorderForeground(rdgDetailPaneIdleBorderColor)
+	} else {
+		leftStyle = leftStyle.BorderForeground(rdgDetailPaneIdleBorderColor)
+		rightStyle = rightStyle.BorderForeground(rdgDetailPaneActiveBorderColor)
+	}
+
+	body := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		leftStyle.Render(strings.Join(leftSlice, "\n")),
+		rightStyle.Render(strings.Join(rightSlice, "\n")),
+	)
+	b.WriteString(body)
+	b.WriteString("\n")
 	b.WriteString(footer)
 	return b.String()
 }
 
-func (s readDisputeGameDetailScreen) renderBody() string {
+// renderHeaderDivider returns a thin horizontal rule used to split
+// the "context" header (title + L1 URL) from the per-snapshot
+// metadata rows (version / prestate / status). Rendered in the same
+// muted color as the rest of the breadcrumb so it reads as a
+// separator, not as content. Fixed width keeps the layout stable on
+// narrow terminals; an adaptive width would force every snapshot
+// fetch to invalidate the cached lipgloss render of the divider for
+// no real gain.
+const rdgDetailDividerWidth = 60
+
+func (s readDisputeGameDetailScreen) renderHeaderDivider() string {
+	return rdgDetailContextStyle.Render(strings.Repeat("─", rdgDetailDividerWidth))
+}
+
+// renderHeaderSummary builds the "version · l2ChainId · gameType"
+// inline summary row that lives directly under the L1 URL line in
+// the header. Each pill turns into an ERR-styled cell when its
+// underlying call failed so the operator sees which field broke
+// without scrolling the data pane.
+func (s readDisputeGameDetailScreen) renderHeaderSummary() string {
+	if s.loading || s.snap == nil {
+		return rdgDetailContextStyle.Render("⏳ loading identity ...")
+	}
+	snap := s.snap
+	pill := func(label, value string, err error) string {
+		if err != nil {
+			return rdgDetailErrStyle.Render(label + " ERR " + err.Error())
+		}
+		return rdgDetailLabelStyle.Render(label+" ") + rdgDetailValueStyle.Render(value)
+	}
+	parts := []string{
+		pill("version", snap.Version, snap.Errors["version"]),
+		pill("l2ChainId", bigOrEmpty(snap.L2ChainID), snap.Errors["l2ChainId"]),
+		pill("gameType", fmt.Sprintf("%d %s", snap.GameType, gameTypeLabel(snap.GameType)), snap.Errors["gameData"]),
+	}
+	return strings.Join(parts, rdgDetailContextStyle.Render("  ·  "))
+}
+
+// renderHeaderPrestate builds the "absolutePrestate 0x..." row of
+// the header. Kept on its own line because the 0x...bytes32 value is
+// long enough that combining it with the summary row would overflow
+// narrow terminals.
+func (s readDisputeGameDetailScreen) renderHeaderPrestate() string {
+	if s.loading || s.snap == nil {
+		return ""
+	}
+	snap := s.snap
+	if e := snap.Errors["absolutePrestate"]; e != nil {
+		return rdgDetailErrStyle.Render("absolutePrestate ERR " + e.Error())
+	}
+	return rdgDetailLabelStyle.Render("absolutePrestate ") + rdgDetailValueStyle.Render(snap.AbsolutePrestate)
+}
+
+// renderHeaderStatus builds the inline status row in the header:
+// `status XX · createdAt YYYY-MM-DD…(Nm) · resolvedAt YYYY-MM-DD…(Nm)`
+// Each pill carries the same color contract as the rest of the
+// header: muted label + bright value, or a red ERR cell when its
+// underlying call failed.
+func (s readDisputeGameDetailScreen) renderHeaderStatus() string {
+	if s.loading || s.snap == nil {
+		return ""
+	}
+	snap := s.snap
+	parts := []string{
+		headerStatusPill(snap.Status, snap.Errors["status"]),
+		headerTimePill("createdAt", snap.CreatedAt, snap.Errors["createdAt"]),
+		headerTimePill("resolvedAt", snap.ResolvedAt, snap.Errors["resolvedAt"]),
+	}
+	return strings.Join(parts, rdgDetailContextStyle.Render("  ·  "))
+}
+
+// headerStatusPill renders the colored enum cell for the status
+// field. Color coding mirrors writeStatusRow's left-pane styling so
+// the operator's mental map carries between the two surfaces.
+func headerStatusPill(st l1.GameStatus, err error) string {
+	if err != nil {
+		return rdgDetailErrStyle.Render("status ERR " + err.Error())
+	}
+	style := rdgDetailValueStyle
+	switch st {
+	case l1.GameStatusInProgress:
+		style = rdgDetailStatusInProg
+	case l1.GameStatusChallengerWins:
+		style = rdgDetailStatusChall
+	case l1.GameStatusDefenderWins:
+		style = rdgDetailStatusDef
+	}
+	return rdgDetailLabelStyle.Render("status ") + style.Render(st.String())
+}
+
+// headerTimePill renders a `createdAt / resolvedAt` cell as a
+// muted-label + UTC-iso + relative-suffix value, or "—" when the
+// timestamp is zero (i.e. the chain hasn't recorded it yet).
+func headerTimePill(label string, unix uint64, err error) string {
+	if err != nil {
+		return rdgDetailErrStyle.Render(label + " ERR " + err.Error())
+	}
+	if unix == 0 {
+		return rdgDetailLabelStyle.Render(label+" ") + rdgDetailContextStyle.Render("—")
+	}
+	t := time.Unix(int64(unix), 0).UTC()
+	return rdgDetailLabelStyle.Render(label+" ") + rdgDetailValueStyle.Render(t.Format("2006-01-02T15:04:05Z")+" ("+humanRelative(t)+")")
+}
+
+// sliceWithPad returns lines[off : off+avail] (clamped to the slice
+// bounds) with empty-string padding when the visible window extends
+// past the end of the content. Keeps the panel height stable across
+// scroll positions so the footer never bounces.
+func sliceWithPad(lines []string, off, avail int) []string {
+	if avail < 1 {
+		return nil
+	}
+	maxOff := max0(len(lines) - avail)
+	if off > maxOff {
+		off = maxOff
+	}
+	if off < 0 {
+		off = 0
+	}
+	end := off + avail
+	if end > len(lines) {
+		end = len(lines)
+	}
+	out := append([]string{}, lines[off:end]...)
+	for len(out) < avail {
+		out = append(out, "")
+	}
+	return out
+}
+
+// buildPanelLines renders both panes as parallel line slices. No
+// truncation is applied — the panel width is sized to the longest
+// left-pane line at render time (see View) so values like bytes32
+// hashes and long Solidity labels remain fully visible.
+func (s readDisputeGameDetailScreen) buildPanelLines() (leftLines, rightLines []string) {
+	left := s.renderLeftPanel()
+	right, _ := s.renderRightPanel()
+	leftLines = strings.Split(left, "\n")
+	rightLines = strings.Split(right, "\n")
+	return leftLines, rightLines
+}
+
+// leftPanelFurnitureWidth accounts for the columns lipgloss reserves
+// inside the left pane style: BorderLeft(1) + PaddingLeft(1) +
+// PaddingRight(1) + BorderRight(1) = 4 columns. lipgloss
+// Style.Width(n) treats `n` as the total cell (content + padding +
+// border), so we add furniture to the measured content width when
+// telling lipgloss how wide to make the pane.
+const leftPanelFurnitureWidth = 4
+
+// leftPaneWidth returns the dynamic width the left pane should
+// occupy. It scans every left line for the widest one (rendered
+// width, ANSI-aware) and pads with the lipgloss border + padding
+// overhead. minLeftPanelWidth is a sanity floor used before the first
+// content arrives.
+func leftPaneWidth(leftLines []string) int {
+	w := 0
+	for _, line := range leftLines {
+		if v := lipgloss.Width(line); v > w {
+			w = v
+		}
+	}
+	if w < minLeftPanelWidth {
+		w = minLeftPanelWidth
+	}
+	return w + leftPanelFurnitureWidth
+}
+
+// cursorLineInRight returns the logical line index of the highlighted
+// claim row inside the right pane, or -1 if no row is selectable.
+// Mirrors renderRightPanel's layout so ensureCursorVisible can scroll
+// to the right spot without re-rendering both panes redundantly.
+func (s readDisputeGameDetailScreen) cursorLineInRight() int {
+	_, line := s.renderRightPanel()
+	return line
+}
+
+// ensureCursorVisible adjusts s.offset so the currently-highlighted
+// claim row sits inside the viewport. Called from Update only after
+// keystrokes that move the cursor (j/k/g/G/enter). PgDn/PgUp do NOT
+// invoke this — the operator may intentionally page past the cursor
+// to read static left-pane sections.
+func (s readDisputeGameDetailScreen) ensureCursorVisible() readDisputeGameDetailScreen {
+	avail := s.viewportHeight()
+	cursorLine := s.cursorLineInRight()
+	if cursorLine < 0 {
+		return s
+	}
+	if cursorLine < s.rightOffset {
+		s.rightOffset = cursorLine
+	}
+	if cursorLine >= s.rightOffset+avail {
+		s.rightOffset = cursorLine - avail + 1
+	}
+	// Final clamp so a snapshot shrink (refresh with fewer claims)
+	// can't leave rightOffset stranded past the end of the new content.
+	return s.clampRightOffset()
+}
+
+// max0 lives in read_dispute_game_screen.go and is shared package-wide.
+
+// clampInt constrains n to [lo, hi].
+func clampInt(n, lo, hi int) int {
+	if n < lo {
+		return lo
+	}
+	if n > hi {
+		return hi
+	}
+	return n
+}
+
+// renderLeftPanel emits the 5 data sections that sit under the HEADER:
+//
+//   - Status & Timing
+//   - Roles
+//   - Output Root Claim   (extraData child: l2BlockNumber)
+//   - Anchor (Starting Point)
+//   - Parameters          (vm, weth, depth/clock knobs)
+//
+// Identity-tier fields (version, gameType, l2ChainId, absolutePrestate)
+// live on the HEADER row above the panes — see View() — so they stay
+// visible while the pane scrolls. Claim-array data has its own
+// dedicated right pane.
+func (s readDisputeGameDetailScreen) renderLeftPanel() string {
 	if s.loading {
-		return rdgDetailContextStyle.Render("⏳ fetching FaultDisputeGame snapshot (single batched RPC) ...")
+		return rdgDetailContextStyle.Render("⏳ fetching snapshot ...")
 	}
 	if s.hardErr != nil {
 		return rdgDetailErrStyle.Render(fmt.Sprintf("ERR fetching snapshot: %v", s.hardErr))
@@ -284,133 +648,171 @@ func (s readDisputeGameDetailScreen) renderBody() string {
 	var b strings.Builder
 	snap := s.snap
 
-	// 1. Identity
-	writeSection(&b, "1. Identity")
-	writeRow(&b, "version", snap.Version, snap.Errors["version"])
-	writeRowf(&b, "gameType", "%d %s", uint64(snap.GameType), gameTypeLabel(snap.GameType))
-	writeRow(&b, "l2ChainId", bigOrEmpty(snap.L2ChainID), snap.Errors["l2ChainId"])
+	// Roles
+	writeSection(&b, "Roles")
 	writeRow(&b, "gameCreator", snap.GameCreator, snap.Errors["gameCreator"])
-
-	// 2. Status & Timing
-	writeSection(&b, "2. Status & Timing")
-	writeStatusRow(&b, snap.Status, snap.Errors["status"])
-	writeTimeRow(&b, "createdAt", snap.CreatedAt, snap.Errors["createdAt"])
-	writeTimeRow(&b, "resolvedAt", snap.ResolvedAt, snap.Errors["resolvedAt"])
-
-	// 3. Roles
-	writeSection(&b, "3. Roles")
 	writeRow(&b, "proposer", snap.Proposer, snap.Errors["proposer"])
 	writeRow(&b, "challenger", snap.Challenger, snap.Errors["challenger"])
-	writeBoolRow(&b, "l2BlockNumberChallenged", snap.L2BlockNumberChallenged, snap.Errors["l2BlockNumberChallenged"])
-	writeRow(&b, "l2BlockNumberChallenger", snap.L2BlockNumberChallenger, snap.Errors["l2BlockNumberChallenger"])
 
-	// 4. Output Root Claim
-	writeSection(&b, "4. Output Root Claim")
+	// Output Root Claim — l2BlockNumber is the decoded form of
+	// extraData, so it renders as a child row directly beneath it.
+	writeSection(&b, "Output Root Claim")
 	writeRow(&b, "rootClaim", snap.RootClaim, snap.Errors["gameData"])
 	writeRow(&b, "l1Head", snap.L1Head, snap.Errors["l1Head"])
 	writeRow(&b, "extraData", truncHex(snap.ExtraData, 80), snap.Errors["gameData"])
-	writeRow(&b, "l2BlockNumber", bigOrEmpty(snap.L2BlockNumber), snap.Errors["l2BlockNumber"])
-	writeRow(&b, "claimDataLen", bigOrEmpty(snap.ClaimDataLen), snap.Errors["claimDataLen"])
+	writeChildRow(&b, "l2BlockNumber", bigOrEmpty(snap.L2BlockNumber), snap.Errors["l2BlockNumber"])
 
-	// 5. Anchor
-	writeSection(&b, "5. Anchor (Starting Point)")
+	// Anchor (Starting Point)
+	writeSection(&b, "Anchor (Starting Point)")
 	writeRow(&b, "anchorStateRegistry", snap.AnchorStateRegistry, snap.Errors["anchorStateRegistry"])
 	writeRow(&b, "startingBlockNumber", bigOrEmpty(snap.StartingBlockNumber), snap.Errors["startingBlockNumber"])
 	writeRow(&b, "startingRootHash", snap.StartingRootHash, snap.Errors["startingRootHash"])
 
-	// 6. Execution VM
-	writeSection(&b, "6. Execution VM")
-	writeRow(&b, "absolutePrestate", snap.AbsolutePrestate, snap.Errors["absolutePrestate"])
+	// Parameters
+	writeSection(&b, "Parameters")
 	writeRow(&b, "vm (MIPS64)", snap.VM, snap.Errors["vm"])
-
-	// 7. Bond Vault
-	writeSection(&b, "7. Bond Vault")
 	writeRow(&b, "weth (DelayedWETH)", snap.WETH, snap.Errors["weth"])
-
-	// 8. Game Parameters
-	writeSection(&b, "8. Game Parameters")
 	writeRow(&b, "maxGameDepth", bigOrEmpty(snap.MaxGameDepth), snap.Errors["maxGameDepth"])
 	writeRow(&b, "splitDepth", bigOrEmpty(snap.SplitDepth), snap.Errors["splitDepth"])
 	writeDurationRow(&b, "maxClockDuration", snap.MaxClockDuration, snap.Errors["maxClockDuration"])
 	writeDurationRow(&b, "clockExtension", snap.ClockExtension, snap.Errors["clockExtension"])
 
-	// 9. Claim Data — the per-claim array indexed by claimDataLen.
-	// Phase-2 batch (claimData(i) + getChallengerDuration(i) per i).
-	s.renderClaimDataSection(&b)
-
 	b.WriteString("\n")
-	b.WriteString(rdgDetailContextStyle.Render(fmt.Sprintf("snapshot latency: %dms", snap.Latency.Milliseconds())))
+	latencies := []string{fmt.Sprintf("snapshot %dms", snap.Latency.Milliseconds())}
 	if s.claimsLatency > 0 {
-		b.WriteString(rdgDetailContextStyle.Render(fmt.Sprintf(" · claimData latency: %dms", s.claimsLatency.Milliseconds())))
+		latencies = append(latencies, fmt.Sprintf("claim %dms", s.claimsLatency.Milliseconds()))
 	}
+	b.WriteString(rdgDetailContextStyle.Render(strings.Join(latencies, " · ")))
 
 	return b.String()
 }
 
-// renderClaimDataSection appends Section 9 to the detail body.
-// Layout: one indented label-value block per claim (vertical) so each
-// entry's seven fields stay readable without horizontal overflow.
-// The challenger-duration line is colored amber when the clock is
-// still running and red when it's already expired, so the operator
-// can scan timing pressure across claims at a glance.
-func (s readDisputeGameDetailScreen) renderClaimDataSection(b *strings.Builder) {
-	switch {
-	case s.snap == nil:
-		return
-	case s.snap.ClaimDataLen == nil:
-		writeSection(b, "9. Claim Data")
-		b.WriteString("  ")
-		b.WriteString(rdgDetailErrStyle.Render("ERR claimDataLen unavailable"))
-		b.WriteString("\n")
-		return
-	case s.snap.ClaimDataLen.Sign() == 0:
-		writeSection(b, "9. Claim Data (0 entries)")
-		b.WriteString("  ")
-		b.WriteString(rdgDetailContextStyle.Render("(no claims submitted yet)"))
-		b.WriteString("\n")
-		return
-	}
-	writeSection(b, fmt.Sprintf("9. Claim Data (%s entries)", s.snap.ClaimDataLen.String()))
-	if s.claimsLoading {
-		b.WriteString("  ")
-		b.WriteString(rdgDetailContextStyle.Render("⏳ fetching claimData[] + getChallengerDuration() ..."))
-		b.WriteString("\n")
-		return
-	}
-	if s.claimsHardErr != nil {
-		b.WriteString("  ")
-		b.WriteString(rdgDetailErrStyle.Render(fmt.Sprintf("ERR loading claim data: %v", s.claimsHardErr)))
-		b.WriteString("\n")
-		return
-	}
-	for i, cd := range s.claims {
-		writeClaimEntry(b, cd, claimErrAt(s.claimErrs, i))
-	}
-}
-
-func claimErrAt(errs []error, i int) error {
-	if i >= 0 && i < len(errs) {
-		return errs[i]
-	}
-	return nil
-}
-
-// writeClaimEntry renders one ClaimData as an indented label-value
-// block. Special-case formatting:
-//   - parentIndex == type(uint32).max → "—" (root claim has no parent)
-//   - counteredBy == zero address → "—" (uncountered)
-//   - challengerDuration == 0 → "expired" in red, else "<n>s" with
-//     amber if under 1 hour remaining
-func writeClaimEntry(b *strings.Builder, cd l1.ClaimData, err error) {
-	header := rdgDetailSectionStyle.Render(fmt.Sprintf("  [%d]", cd.Index))
-	b.WriteString(header)
+// writeChildRow renders an indented label-value row, e.g. for the
+// l2BlockNumber decoded form sitting under extraData. Uses a tree
+// "└─" prefix so the parent/child relationship reads naturally in
+// terminals with box-drawing support.
+func writeChildRow(b *strings.Builder, label, value string, err error) {
+	b.WriteString("    └─ ")
+	const childLabelW = labelW - 5 // account for the "  └─ " indent
+	b.WriteString(rdgDetailLabelStyle.Render(padRight(label, childLabelW)))
+	b.WriteString(" ")
 	if err != nil {
-		b.WriteString("  ")
 		b.WriteString(rdgDetailErrStyle.Render(fmt.Sprintf("ERR %v", err)))
-		b.WriteString("\n")
-		return
+	} else if value == "" {
+		b.WriteString(rdgDetailContextStyle.Render("—"))
+	} else {
+		b.WriteString(rdgDetailValueStyle.Render(value))
 	}
 	b.WriteString("\n")
+}
+
+// renderRightPanel produces the per-claim list on the right side. Each
+// claim is one collapsed row by default; pressing enter on it toggles
+// an expansion that inlines all seven ClaimData fields plus the
+// challenger duration. Returns the logical line index of the cursor
+// row so View() can auto-scroll the shared viewport to keep the
+// highlighted row visible.
+//
+// The right pane always has a header line and (when applicable) an
+// empty / loading / error state, so it never collapses to zero height
+// even when the snapshot has no claims.
+func (s readDisputeGameDetailScreen) renderRightPanel() (string, int) {
+	var b strings.Builder
+	cursorLine := -1
+
+	b.WriteString(rdgDetailSectionStyle.Render("Claim Data"))
+	b.WriteString("\n")
+
+	switch {
+	case s.snap == nil || s.snap.ClaimDataLen == nil:
+		if s.loading {
+			b.WriteString(rdgDetailContextStyle.Render("  (waiting for snapshot)"))
+		} else if s.hardErr != nil {
+			b.WriteString(rdgDetailErrStyle.Render("  ERR snapshot unavailable"))
+		} else {
+			b.WriteString(rdgDetailErrStyle.Render("  ERR claimDataLen unavailable"))
+		}
+		b.WriteString("\n")
+		return b.String(), cursorLine
+	case s.snap.ClaimDataLen.Sign() == 0:
+		b.WriteString(rdgDetailContextStyle.Render("  (no claims submitted yet)"))
+		b.WriteString("\n")
+		return b.String(), cursorLine
+	}
+
+	b.WriteString(rdgDetailContextStyle.Render(fmt.Sprintf("(%s entries · ⏎ toggle)", s.snap.ClaimDataLen.String())))
+	b.WriteString("\n")
+
+	if s.claimsLoading {
+		b.WriteString(rdgDetailContextStyle.Render("⏳ fetching claimData[] + getChallengerDuration() ..."))
+		b.WriteString("\n")
+		return b.String(), cursorLine
+	}
+	if s.claimsHardErr != nil {
+		b.WriteString(rdgDetailErrStyle.Render(fmt.Sprintf("ERR loading claim data: %v", s.claimsHardErr)))
+		b.WriteString("\n")
+		return b.String(), cursorLine
+	}
+
+	// Per-claim block. Each row tracks its own start line so we can
+	// hand the View() auto-scroll the cursor's logical line.
+	for i, cd := range s.claims {
+		isCursor := i == s.cursor
+		expanded := s.expanded != nil && s.expanded[cd.Index]
+
+		if isCursor {
+			cursorLine = strings.Count(b.String(), "\n") // 0-based line of this row
+		}
+
+		writeClaimSummary(&b, cd, claimErrAt(s.claimErrs, i), isCursor, expanded)
+		if expanded && s.claimErrs == nil || (i < len(s.claimErrs) && s.claimErrs[i] == nil && expanded) {
+			writeClaimExpansion(&b, cd)
+		}
+	}
+	return b.String(), cursorLine
+}
+
+// writeClaimSummary renders the single compact row for one claim:
+//   `▶ [i] 0xabcd…1234 · bond N · rem Nh`
+// or, when expanded:
+//   `▼ [i] 0xabcd…1234 · bond N · rem Nh`
+// The cursor row is fully-highlighted (background + bold) so it stays
+// visible alongside the left pane.
+func writeClaimSummary(b *strings.Builder, cd l1.ClaimData, err error, isCursor, isExpanded bool) {
+	disclosure := "▶"
+	if isExpanded {
+		disclosure = "▼"
+	}
+	cursorMark := "  "
+	if isCursor {
+		cursorMark = "▸ "
+	}
+	// On per-row error, replace the value cells with the error so the
+	// summary still occupies one line — keeps the list navigation sane.
+	var summary string
+	if err != nil {
+		summary = fmt.Sprintf("%s %s [%d] ERR %v", cursorMark, disclosure, cd.Index, err)
+	} else {
+		summary = fmt.Sprintf("%s %s [%d] %s · bond %s · rem %s",
+			cursorMark,
+			disclosure,
+			cd.Index,
+			shortAddr(cd.Claimant),
+			shortBigOrDash(cd.Bond),
+			shortRemaining(cd.ChallengerDuration),
+		)
+	}
+	if isCursor {
+		summary = rdgListSelectStyle.Render(strings.TrimRight(summary, " "))
+	}
+	b.WriteString(summary)
+	b.WriteString("\n")
+}
+
+// writeClaimExpansion appends the eight-field detail block under an
+// expanded claim. Indentation matches the cursor gutter so the field
+// labels sit a few columns to the right of the summary.
+func writeClaimExpansion(b *strings.Builder, cd l1.ClaimData) {
 	writeClaimField(b, "parent", parentLabel(cd))
 	writeClaimField(b, "claimant", cd.Claimant)
 	writeClaimField(b, "counteredBy", counteredByLabel(cd))
@@ -419,6 +821,58 @@ func writeClaimEntry(b *strings.Builder, cd l1.ClaimData, err error) {
 	writeClaimField(b, "position", bigOrEmpty(cd.Position))
 	writeClaimField(b, "clock", bigOrEmpty(cd.Clock))
 	writeClaimDurationField(b, cd.ChallengerDuration)
+}
+
+// shortAddr returns "0xABCD…1234" — first 4 + last 4 hex chars after
+// the 0x prefix. Used for compact summaries; the expanded block still
+// shows the full address.
+func shortAddr(a string) string {
+	if len(a) < 10 {
+		return a
+	}
+	return a[:6] + "…" + a[len(a)-4:]
+}
+
+// shortBigOrDash formats a uint128/uint256 for the summary row:
+// returns "—" for nil or zero, otherwise the full decimal string
+// (operators care about exact bond amounts).
+func shortBigOrDash(n *big.Int) string {
+	if n == nil || n.Sign() == 0 {
+		return "—"
+	}
+	return n.String()
+}
+
+// shortRemaining formats a Duration (seconds) for the summary cell:
+// "expired" (0), "Ns" (<60), "Nm" (<3600), "Nh" (<86400), "Nd"
+// (otherwise). Color is applied at the cursor-row level so this just
+// returns text.
+func shortRemaining(seconds uint64) string {
+	switch {
+	case seconds == 0:
+		return "expired"
+	case seconds < 60:
+		return fmt.Sprintf("%ds", seconds)
+	case seconds < 3600:
+		return fmt.Sprintf("%dm", seconds/60)
+	case seconds < 86400:
+		return fmt.Sprintf("%dh", seconds/3600)
+	default:
+		return fmt.Sprintf("%dd", seconds/86400)
+	}
+}
+
+// renderClaimDataSection appends Section 9 to the detail body.
+// Layout: one indented label-value block per claim (vertical) so each
+// entry's seven fields stay readable without horizontal overflow.
+// The challenger-duration line is colored amber when the clock is
+// still running and red when it's already expired, so the operator
+// can scan timing pressure across claims at a glance.
+func claimErrAt(errs []error, i int) error {
+	if i >= 0 && i < len(errs) {
+		return errs[i]
+	}
+	return nil
 }
 
 func writeClaimField(b *strings.Builder, label, value string) {
@@ -467,8 +921,14 @@ func counteredByLabel(cd l1.ClaimData) string {
 
 // --- row helpers ---
 
+// writeSection emits a section header with a leading blank line as a
+// separator between sections. The leading blank is skipped when the
+// buffer is empty so the first section in a pane sits flush against
+// the top border instead of starting with an awkward empty row.
 func writeSection(b *strings.Builder, title string) {
-	b.WriteString("\n")
+	if b.Len() > 0 {
+		b.WriteString("\n")
+	}
 	b.WriteString(rdgDetailSectionStyle.Render(title))
 	b.WriteString("\n")
 }

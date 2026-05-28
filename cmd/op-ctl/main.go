@@ -124,11 +124,39 @@ func chainNameFromConfigPath(p string) string {
 	return base
 }
 
+// effectiveNamespaceDir returns the directory subcommands should read
+// namespace files from. When the operator passed an explicit
+// --namespace-dir / --dir flag, it wins (no rewriting). Otherwise
+// fall back to defaultNamespaceDir, anchored at the config file's
+// project root so the path is cwd-independent.
+func effectiveNamespaceDir(flag, configPath string) string {
+	if flag != "" {
+		return flag
+	}
+	return defaultNamespaceDir(configPath)
+}
+
 // defaultNamespaceDir returns the per-chain default namespace
-// directory: ./namespace/<chain>. Operators can still override via
-// the subcommand's --dir flag.
+// directory. The path is resolved relative to the *parent* of the
+// config file's directory — i.e. project_root/namespace/<chain> — so
+// op-ctl finds the same JSON snapshots regardless of which cwd it
+// was launched from. Operators can still override via the
+// subcommand's --dir flag when they keep namespace files elsewhere.
+//
+// Resolution logic mirrors [contracts].state_root: relative paths are
+// re-anchored to the directory containing the config file. The repo
+// layout under config/<chain>.toml puts namespace/ as a sibling, so
+// the "parent of config dir" walk lands in the expected place.
 func defaultNamespaceDir(configPath string) string {
-	return filepath.Join("./namespace", chainNameFromConfigPath(configPath))
+	abs, err := filepath.Abs(configPath)
+	if err != nil {
+		// Fallback: cwd-relative — preserves prior behavior if Abs
+		// ever fails (unusual but theoretically possible on a path
+		// that resolves through a deleted parent during invocation).
+		return filepath.Join("./namespace", chainNameFromConfigPath(configPath))
+	}
+	projectRoot := filepath.Dir(filepath.Dir(abs))
+	return filepath.Join(projectRoot, "namespace", chainNameFromConfigPath(configPath))
 }
 
 // defaultConfigDir returns the directory op-ctl scans for *.toml files

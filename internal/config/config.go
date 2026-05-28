@@ -98,13 +98,18 @@ type Config struct {
 	path     string
 }
 
-// RPCConfig holds L1-side RPC endpoint(s) op-ctl reads from.
-// op-ctl is L2-paychain centric so this is strictly read-only L1 access
-// (no signing keys, no transaction submission) — consumed by the
-// `op-ctl read` subcommands that call view methods on settlement-layer
-// contracts (DisputeGameFactoryProxy, OptimismPortalProxy, ...).
+// RPCConfig holds RPC endpoints op-ctl reads from.
+//
+// L1RPCURL is the settlement-layer endpoint used for view calls on L1
+// contracts (DisputeGameFactoryProxy, SystemConfigProxy, ...). L2RPCURL
+// targets the L2 EL node for view calls on L2 predeploys (BaseFeeVault,
+// SequencerFeeVault, ...) and for eth_getBalance on those vaults.
+//
+// op-ctl is L2-paychain centric so this is strictly read-only access on
+// both sides (no signing keys, no transaction submission).
 type RPCConfig struct {
 	L1RPCURL string `toml:"l1_rpc_url"`
+	L2RPCURL string `toml:"l2_rpc_url"`
 }
 
 // ContractsConfig points at the on-disk state.json (op-deployer output)

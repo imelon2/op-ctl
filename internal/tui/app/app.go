@@ -440,6 +440,29 @@ func (a App) handleCmdSelected(name string) (App, tea.Cmd) {
 		screen := newReadDisputeGameScreen(a.cfg.RPC.L1RPCURL, addrs.DisputeGameFactoryProxy, timeout)
 		a = a.push(screen)
 		return a, screen.Init()
+	case "network-fee":
+		// Disambiguate by parent: `network-fee` only belongs under `read`.
+		if target.Parent() == nil || target.Parent().Name() != "read" {
+			return a, nil
+		}
+		if a.cfg.RPC.L1RPCURL == "" {
+			return a.push(newErrScreen("config: [rpc].l1_rpc_url is not set")), nil
+		}
+		// state.json may pre-date the SystemConfigProxy field — the
+		// screen surfaces a per-section ERR for that case rather than
+		// failing the whole push, so a half-loaded chain still renders
+		// its FeeVault balances.
+		addrs, err := contracts.Load(a.cfg.Contracts.StateRoot)
+		if err != nil {
+			return a.push(newErrScreen(err.Error())), nil
+		}
+		timeout := a.timeout
+		if timeout <= 0 {
+			timeout = 10 * time.Second
+		}
+		screen := newReadNetworkFeeScreen(a.cfg.RPC.L1RPCURL, a.cfg.RPC.L2RPCURL, addrs.SystemConfigProxy, timeout)
+		a = a.push(screen)
+		return a, screen.Init()
 	case "txpool":
 		// Disambiguate by parent: `txpool` only belongs under `status`.
 		if target.Parent() == nil || target.Parent().Name() != "status" {

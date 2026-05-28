@@ -18,8 +18,16 @@ import (
 // Fields are returned in their on-disk form (hex with 0x prefix,
 // mixed case as op-deployer wrote them) — call sites that need
 // canonical lower-case can normalize at use time.
+//
+// Per-field requiredness is enforced at the *consumer*, not at load:
+// only DisputeGameFactoryProxy is required up front today (legacy of
+// the `read dispute-game` command shipping first). Other fields default
+// to empty when absent and the subcommand that needs them surfaces the
+// missing-address error — that way adding a new field doesn't break
+// operator configs that pre-date it.
 type Addresses struct {
 	DisputeGameFactoryProxy string
+	SystemConfigProxy       string
 }
 
 // stateFile mirrors the shape of state.json. Only opChainDeployments
@@ -32,6 +40,7 @@ type stateFile struct {
 type opChainDeployment struct {
 	ID                      string `json:"id"`
 	DisputeGameFactoryProxy string `json:"DisputeGameFactoryProxy"`
+	SystemConfigProxy       string `json:"SystemConfigProxy"`
 }
 
 // Load reads state.json from path and returns the L1 contract address
@@ -60,5 +69,6 @@ func Load(path string) (*Addresses, error) {
 	}
 	return &Addresses{
 		DisputeGameFactoryProxy: chain.DisputeGameFactoryProxy,
+		SystemConfigProxy:       chain.SystemConfigProxy,
 	}, nil
 }

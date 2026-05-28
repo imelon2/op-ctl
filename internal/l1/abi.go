@@ -107,6 +107,12 @@ func wordToUint32(w []byte) uint32 {
 	return n
 }
 
+// wordToUint16 returns the last 2 bytes of the word as a big-endian
+// uint16. Solidity's daFootprintGasScalar is uint16.
+func wordToUint16(w []byte) uint16 {
+	return uint16(w[30])<<8 | uint16(w[31])
+}
+
 // wordToUint8 returns the last byte. Solidity's GameStatus enum and
 // other small enums are packed in the lowest byte of a 32-byte word.
 func wordToUint8(w []byte) uint8 { return w[31] }

@@ -22,7 +22,8 @@ func TestLoad_Success(t *testing.T) {
   "opChainDeployments": [
     {
       "id": "0x000000000000000000000000000000000000000000000000000000000000a5e8",
-      "DisputeGameFactoryProxy": "0x9b6709999e8fd16cae9e27bd0e7cf4b747097239"
+      "DisputeGameFactoryProxy": "0x9b6709999e8fd16cae9e27bd0e7cf4b747097239",
+      "SystemConfigProxy": "0x586fb5eac03e347a9ab109618296d9aad915a2ee"
     }
   ]
 }`)
@@ -32,6 +33,30 @@ func TestLoad_Success(t *testing.T) {
 	}
 	if got, want := a.DisputeGameFactoryProxy, "0x9b6709999e8fd16cae9e27bd0e7cf4b747097239"; got != want {
 		t.Errorf("DisputeGameFactoryProxy: got %q, want %q", got, want)
+	}
+	if got, want := a.SystemConfigProxy, "0x586fb5eac03e347a9ab109618296d9aad915a2ee"; got != want {
+		t.Errorf("SystemConfigProxy: got %q, want %q", got, want)
+	}
+}
+
+// TestLoad_OmitSystemConfigProxy verifies that the field is optional —
+// older state.json files without SystemConfigProxy still load fine; the
+// consumer (e.g. `read network-fee`) surfaces the missing-address error.
+func TestLoad_OmitSystemConfigProxy(t *testing.T) {
+	p := writeStateFile(t, `{
+  "opChainDeployments": [
+    {
+      "id": "0xabc",
+      "DisputeGameFactoryProxy": "0x9b6709999e8fd16cae9e27bd0e7cf4b747097239"
+    }
+  ]
+}`)
+	a, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if a.SystemConfigProxy != "" {
+		t.Errorf("absent SystemConfigProxy should leave empty string, got %q", a.SystemConfigProxy)
 	}
 }
 

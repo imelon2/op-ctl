@@ -6,6 +6,20 @@ namespace_retry   = 3
 # (op-stack default) when unset.
 l2_block_time = "1s"
 
+# [rpc] is consumed by the `op-ctl read` subcommands. l1_rpc_url drives
+# L1 view calls (dispute-game, network-fee→SystemConfig); l2_rpc_url
+# drives L2 view calls (network-fee→FeeVault predeploys).
+[rpc]
+l1_rpc_url = "https://ethereum-sepolia-rpc.publicnode.com"
+l2_rpc_url = "http://127.0.0.1:8545"
+
+# [contracts].state_root points at the op-deployer state.json that
+# holds this chain's L1 contract addresses (DisputeGameFactoryProxy,
+# SystemConfigProxy, ...). Relative paths resolve against the dir of
+# this config file.
+[contracts]
+state_root = "state.json"
+
 [backends]
 # A map of backends by name.
 [backends.sequencer-1]

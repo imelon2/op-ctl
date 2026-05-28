@@ -81,7 +81,7 @@ var p2pConsensusCmd = &cobra.Command{
 		}
 		bs := cfg.BackendList()
 
-		idx, err := namespace.LoadIndex(p2pConsensusDir)
+		idx, err := namespace.LoadIndex(effectiveNamespaceDir(p2pConsensusDir, cfg.Path()))
 		if err != nil {
 			return err
 		}
@@ -165,7 +165,7 @@ var p2pExecutionCmd = &cobra.Command{
 		}
 		bs := cfg.BackendList()
 
-		idx, err := namespace.LoadIndex(p2pExecutionDir)
+		idx, err := namespace.LoadIndex(effectiveNamespaceDir(p2pExecutionDir, cfg.Path()))
 		if err != nil {
 			return err
 		}
@@ -257,7 +257,7 @@ var p2pDiscoveryConsensusCmd = &cobra.Command{
 		}
 		bs := cfg.BackendList()
 
-		idx, err := namespace.LoadIndex(p2pDiscoveryConsensusDir)
+		idx, err := namespace.LoadIndex(effectiveNamespaceDir(p2pDiscoveryConsensusDir, cfg.Path()))
 		if err != nil {
 			return err
 		}
@@ -552,8 +552,8 @@ func init() {
 		"skip the menu and query this backend by name",
 	)
 	p2pConsensusCmd.Flags().StringVar(
-		&p2pConsensusDir, "namespace-dir", "./namespace",
-		"directory of namespace files used to translate peerIDs to backend names",
+		&p2pConsensusDir, "namespace-dir", "",
+		"directory of namespace files used to translate peerIDs to backend names (default: <project>/namespace/<chain>, derived from --config)",
 	)
 	p2pConsensusCmd.Flags().DurationVar(
 		&p2pConsensusTimeout, "timeout", 5*time.Second,
@@ -570,8 +570,8 @@ func init() {
 		"skip the menu and query this backend by name",
 	)
 	p2pExecutionCmd.Flags().StringVar(
-		&p2pExecutionDir, "namespace-dir", "./namespace",
-		"directory of namespace files used to translate node IDs to backend names",
+		&p2pExecutionDir, "namespace-dir", "",
+		"directory of namespace files used to translate node IDs to backend names (default: <project>/namespace/<chain>, derived from --config)",
 	)
 	p2pExecutionCmd.Flags().DurationVar(
 		&p2pExecutionTimeout, "timeout", 5*time.Second,
@@ -590,8 +590,8 @@ func init() {
 		"skip the menu and query this backend by name",
 	)
 	p2pDiscoveryConsensusCmd.Flags().StringVar(
-		&p2pDiscoveryConsensusDir, "namespace-dir", "./namespace",
-		"directory of namespace files used to translate ENRs to backend names",
+		&p2pDiscoveryConsensusDir, "namespace-dir", "",
+		"directory of namespace files used to translate ENRs to backend names (default: <project>/namespace/<chain>, derived from --config)",
 	)
 	p2pDiscoveryConsensusCmd.Flags().DurationVar(
 		&p2pDiscoveryConsensusTimeout, "timeout", 5*time.Second,
