@@ -193,6 +193,58 @@ func FetchGasPriceOracleSnapshot(ctx context.Context, hc *http.Client, l2RPCURL 
 	return s, nil
 }
 
+// L1DataFeeSnapshot holds just the live L1 data-fee inputs the
+// GasPriceOracle exposes — the two values that move every L1 block.
+// It is the live subset of GasPriceOracleSnapshot, fetched on the
+// screen's 1s tick while the static oracle parameters (scalars,
+// decimals, pinned constants, version) are fetched once. Errors are
+// keyed by "l1BaseFee" / "blobBaseFee".
+type L1DataFeeSnapshot struct {
+	L1BaseFee   *big.Int
+	BlobBaseFee *big.Int
+	Errors      map[string]error
+	Latency     time.Duration
+}
+
+// FetchL1DataFeeSnapshot batches l1BaseFee() + blobBaseFee() against the
+// GasPriceOracle predeploy in a single POST — cheap enough to poll each
+// second. The snapshot is always non-nil so partial rendering works.
+func FetchL1DataFeeSnapshot(ctx context.Context, hc *http.Client, l2RPCURL string) *L1DataFeeSnapshot {
+	s := &L1DataFeeSnapshot{Errors: map[string]error{}}
+	if strings.TrimSpace(l2RPCURL) == "" {
+		err := fmt.Errorf("l2_rpc_url is empty (set [rpc].l2_rpc_url in config.toml)")
+		s.Errors["l1BaseFee"] = err
+		s.Errors["blobBaseFee"] = err
+		return s
+	}
+	calls := []l1.EthCallReq{
+		{To: GasPriceOracleAddr, Data: l1BaseFeeSelector},
+		{To: GasPriceOracleAddr, Data: blobBaseFeeSelector},
+	}
+	results, lat, err := l1.EthCallBatch(ctx, hc, l2RPCURL, calls)
+	s.Latency = lat
+	if err != nil {
+		s.Errors["l1BaseFee"] = err
+		s.Errors["blobBaseFee"] = err
+		return s
+	}
+	if r := results[0]; r.Err != nil {
+		s.Errors["l1BaseFee"] = r.Err
+	} else if n, derr := decodeUint256(r.Result); derr != nil {
+		s.Errors["l1BaseFee"] = fmt.Errorf("decode l1BaseFee: %w", derr)
+	} else {
+		s.L1BaseFee = n
+	}
+	if r := results[1]; r.Err != nil {
+		s.Errors["blobBaseFee"] = r.Err
+	} else if n, derr := decodeUint256(r.Result); derr != nil {
+		s.Errors["blobBaseFee"] = fmt.Errorf("decode blobBaseFee: %w", derr)
+	} else {
+		s.BlobBaseFee = n
+	}
+	return s
+}
+
 // decodeUint32 parses a single-word eth_call result into a uint32 —
 // the scalar getters (baseFeeScalar / blobBaseFeeScalar) return a
 // uint32 right-aligned in one ABI word.

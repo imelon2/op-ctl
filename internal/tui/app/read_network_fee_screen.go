@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"op-ctl/internal/l1"
 	"op-ctl/internal/l2"
@@ -52,11 +53,23 @@ type readNetworkFeeVaultsMsg struct {
 type readNetworkFeeVaultTickMsg struct{ gen uint64 }
 
 // readNetworkFeeGPOMsg carries the one-shot L2 GasPriceOracle fetch
-// result. Like SystemConfig, these are constants — fetched on entry
-// and re-fetched on 'r' refresh.
+// result. The oracle's scaling parameters, pinned constants, and
+// version are static (governance / deploy paced), so they are fetched
+// once on entry and re-fetched only on manual 'r' refresh — the live
+// L1 fee inputs are handled separately by readNetworkFeeL1FeeMsg.
 type readNetworkFeeGPOMsg struct {
 	snap *l2.GasPriceOracleSnapshot
 	err  error
+}
+
+// readNetworkFeeL1FeeMsg carries one live L1 data-fee sample
+// (l1BaseFee + blobBaseFee from the GasPriceOracle). It rides the same
+// generation-tagged tick loop as the vault and gas samples so the
+// Live > Gas Oracle > L1 Data Fee block refreshes every second; a slow
+// response from tick N is dropped when it lands after tick N+1.
+type readNetworkFeeL1FeeMsg struct {
+	gen  uint64
+	snap *l2.L1DataFeeSnapshot
 }
 
 // readNetworkFeeGasMsg carries one live gas-price sample (eth_gasPrice
@@ -79,31 +92,45 @@ type readNetworkFeeBlockMsg struct {
 // --- screen ---
 
 // readNetworkFeeScreen is the TUI counterpart of
-// `op-ctl read network-fee`. Two sections, top-to-bottom:
+// `op-ctl read network-fee`. A fixed header (RPC endpoints) sits above
+// a single scrollable body split into two groups:
 //
-//	FeeVaults   — auto-refreshing every 1s
-//	SystemConfig — fetched once on push, refresh on 'r'
+//	Live    — the numbers that move:
+//	            FeeVaults (balances, auto-refresh 1s)
+//	            Gas Oracle
+//	              GasPrice    (maxPriorityFeePerGas, baseFee — live 1s)
+//	              L1 Data Fee (l1BaseFee, blobBaseFee — GasPriceOracle)
+//	Config  — slow-changing chain parameters:
+//	            GasPriceOracle (scalars, decimals, pinned constants)
+//	            Block EIP-1559 (extraData-decoded params in force)
+//	            SystemConfig   (deploy/governance-paced fee params)
 //
-// FeeVaults sits on top because it is the operationally interesting
-// section (real-time balance accrual); SystemConfig parameters drift
-// only on governance action so they read more like static metadata.
-//
-// Sketch:
+// Live sits on top because it is the operationally interesting data
+// (real-time balance + gas accrual); Config reads more like static
+// metadata. The body scrolls (j/k, g/G, PgUp/PgDn) since the full
+// parameter set overflows most terminals; the offset survives the 1s
+// auto-refresh so the operator does not get bounced back to the top.
 //
 //	read / network-fee
 //	L1: https://...
 //	L2: http://...
 //
+//	Live
 //	FeeVaults                                             latency: 27ms
-//	┌──────────┬───────────────┬────────────────┬─────────────────────┐
-//	│ balance  │ totalProcessed │ address        │ (vault name col)   │
-//	└──────────┴───────────────┴────────────────┴─────────────────────┘
+//	  ...
+//	Gas Oracle
+//	  GasPrice                                            latency: 9ms
+//	    maxPriorityFeePerGas  1000000
+//	    baseFee               7
+//	  L1 Data Fee                                         latency: 31ms
+//	    l1BaseFee             ...
+//	    blobBaseFee           ...
 //
-//	SystemConfig (0x...)                                  latency: 442ms
-//	  basefeeScalar         1368
+//	Config
+//	GasPriceOracle (0x...)                                latency: 12ms
 //	  ...
 //
-//	auto-refresh 1s · r refresh · q back
+//	↑/↓ j/k scroll · g/G top/bottom · r refresh · q back · auto 1s
 type readNetworkFeeScreen struct {
 	l1RPCURL         string
 	l2RPCURL         string
@@ -114,6 +141,9 @@ type readNetworkFeeScreen struct {
 	sysCfg        *l1.SystemConfigSnapshot
 	sysCfgErr     error
 
+	// gpo is the GasPriceOracle's static parameters (scalars, decimals,
+	// pinned constants, version). Fetched once on entry + 'r' refresh —
+	// these are governance/deploy-paced, not live.
 	gpoLoading bool
 	gpo        *l2.GasPriceOracleSnapshot
 	gpoErr     error
@@ -121,11 +151,14 @@ type readNetworkFeeScreen struct {
 	blkLoading bool
 	blk        *l2.BlockEIP1559Snapshot
 
-	// gas rides the vaultGen tick loop (real-time, 1s) — the operator
-	// wants live gasPrice / tip / baseFee, so it refreshes alongside the
-	// vault balances rather than once on entry.
+	// gas + l1fee both ride the vaultGen tick loop (real-time, 1s). gas
+	// is the live gasPrice / tip / baseFee; l1fee is the live l1BaseFee /
+	// blobBaseFee from the GasPriceOracle (the moving subset of gpo).
 	gasLoading bool
 	gas        *l2.GasPriceSnapshot
+
+	l1feeLoading bool
+	l1fee        *l2.L1DataFeeSnapshot
 
 	// vaultGen is the monotonic generation counter for the auto-tick
 	// loop. Init() emits the gen=1 tick immediately so the first RPC
@@ -137,6 +170,12 @@ type readNetworkFeeScreen struct {
 	vaults        []l2.VaultSnapshot
 	vaultsLat     time.Duration
 	vaultsErr     error
+
+	// offset is the scroll position of the body region (Live + Config).
+	// Clamped against the rendered body height on each scroll key and
+	// again in View, so it survives the 1s auto-refresh without losing
+	// the operator's place.
+	offset int
 
 	width, height int
 }
@@ -152,12 +191,15 @@ func newReadNetworkFeeScreen(l1RPCURL, l2RPCURL, systemConfigAddr string, timeou
 		gpoLoading:       true,
 		blkLoading:       true,
 		gasLoading:       true,
+		l1feeLoading:     true,
 	}
 }
 
 func (s readNetworkFeeScreen) Init() tea.Cmd {
 	// Emit gen=1 immediately (no initial 1s wait), in parallel with the
-	// one-shot SystemConfig + GasPriceOracle fetches.
+	// one-shot SystemConfig + GasPriceOracle + latest-block fetches. The
+	// live samples (vaults, gas, l1 data fee) ride the gen=1 tick; the
+	// one-shot fetches here cover the static parameters.
 	return tea.Batch(
 		fetchSysCfgCmd(s.l1RPCURL, s.systemConfigAddr, s.timeout),
 		fetchGPOCmd(s.l2RPCURL, s.timeout),
@@ -183,16 +225,28 @@ func fetchSysCfgCmd(l1RPCURL, addr string, timeout time.Duration) tea.Cmd {
 }
 
 // fetchGPOCmd issues the batched RPC POST against the L2
-// GasPriceOracle predeploy for the three FastLZ→Brotli regression
-// constants (costIntercept / costFastlzCoef / minTransactionSize).
-// These are contract constants — no auto-tick, fetched on entry and
-// on manual 'r' refresh.
+// GasPriceOracle predeploy for its static parameters (scalars,
+// decimals, pinned constants, version). One-shot: issued on entry and
+// on manual 'r' refresh — the live l1BaseFee / blobBaseFee subset is
+// polled separately by fetchL1FeeCmd on the tick.
 func fetchGPOCmd(l2RPCURL string, timeout time.Duration) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 		snap, err := l2.FetchGasPriceOracleSnapshot(ctx, nil, l2RPCURL)
 		return readNetworkFeeGPOMsg{snap: snap, err: err}
+	}
+}
+
+// fetchL1FeeCmd issues l1BaseFee() + blobBaseFee() against the L2
+// GasPriceOracle, tagged with the tick gen so Update can drop stale
+// samples — the live subset that rides the 1s vault tick loop.
+func fetchL1FeeCmd(l2RPCURL string, timeout time.Duration, gen uint64) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		snap := l2.FetchL1DataFeeSnapshot(ctx, nil, l2RPCURL)
+		return readNetworkFeeL1FeeMsg{gen: gen, snap: snap}
 	}
 }
 
@@ -252,9 +306,20 @@ func (s readNetworkFeeScreen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		s.sysCfgErr = m.err
 
 	case readNetworkFeeGPOMsg:
+		// One-shot (entry + 'r'): the static oracle parameters, no gen
+		// gate. The live l1/blob subset arrives via readNetworkFeeL1FeeMsg.
 		s.gpoLoading = false
 		s.gpo = m.snap
 		s.gpoErr = m.err
+
+	case readNetworkFeeL1FeeMsg:
+		// Drop stragglers from earlier ticks — same generation gate as
+		// the vault and gas samples.
+		if m.gen != s.vaultGen {
+			return s, nil
+		}
+		s.l1feeLoading = false
+		s.l1fee = m.snap
 
 	case readNetworkFeeBlockMsg:
 		s.blkLoading = false
@@ -272,6 +337,7 @@ func (s readNetworkFeeScreen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return s, tea.Batch(
 			fetchVaultsCmd(s.l2RPCURL, s.timeout, s.vaultGen),
 			fetchGasCmd(s.l2RPCURL, s.timeout, s.vaultGen),
+			fetchL1FeeCmd(s.l2RPCURL, s.timeout, s.vaultGen),
 			vaultTickCmd(vaultRefreshInterval, s.vaultGen+1),
 		)
 
@@ -301,12 +367,31 @@ func (s readNetworkFeeScreen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return s, func() tea.Msg { return popMsg{} }
 		case "ctrl+c":
 			return s, tea.Quit
+		case "j", "down":
+			s.offset++
+			return s.clampOffset(), nil
+		case "k", "up":
+			s.offset--
+			return s.clampOffset(), nil
+		case "g", "home":
+			s.offset = 0
+			return s, nil
+		case "G", "end":
+			s.offset = s.maxScrollOffset()
+			return s, nil
+		case "pgdown", "ctrl+d", " ":
+			s.offset += halfPage(s.height)
+			return s.clampOffset(), nil
+		case "pgup", "ctrl+u", "b":
+			s.offset -= halfPage(s.height)
+			return s.clampOffset(), nil
 		case "r":
-			// Manual refresh: re-fire SystemConfig + GasPriceOracle
-			// fetches AND restart the vault tick chain by issuing the
-			// next expected gen immediately. The existing tea.Tick will
-			// still deliver its scheduled tick but the gen check will
-			// discard it as stale.
+			// Manual refresh: re-fire the one-shot SystemConfig +
+			// GasPriceOracle + latest block fetches AND restart the vault
+			// tick chain by issuing the next expected gen immediately. The
+			// existing tea.Tick still delivers its scheduled tick but the
+			// gen check discards it as stale. The live samples (vaults,
+			// gas, l1 data fee) refresh via the restarted chain.
 			s.sysCfgLoading = true
 			s.sysCfg = nil
 			s.sysCfgErr = nil
@@ -327,38 +412,202 @@ func (s readNetworkFeeScreen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return s, nil
 }
 
-func (s readNetworkFeeScreen) View() string {
+// rnfHeaderLines is the fixed (non-scrolling) header height: the title
+// plus the L1 and L2 endpoint lines.
+const rnfHeaderLines = 3
+
+func (s readNetworkFeeScreen) renderHeader() string {
+	return theme.Title.Render("read / network-fee") + "\n" +
+		theme.Subtitle.Render("L1: "+s.l1RPCURL) + "\n" +
+		theme.Subtitle.Render("L2: "+s.l2RPCURL)
+}
+
+// renderBody assembles the scrollable Live + Config content. Kept
+// separate from View so the scroll math (and maxScrollOffset) can
+// measure the full content height without the fixed header/footer.
+func (s readNetworkFeeScreen) renderBody() string {
 	var b strings.Builder
 
-	b.WriteString(theme.Title.Render("read / network-fee"))
-	b.WriteString("\n")
-	b.WriteString(theme.Subtitle.Render("L1: " + s.l1RPCURL))
-	b.WriteString("\n")
-	b.WriteString(theme.Subtitle.Render("L2: " + s.l2RPCURL))
+	// ----- Live: the numbers that move -----
+	b.WriteString(s.renderLiveSection())
+
 	b.WriteString("\n\n")
 
-	// FeeVaults first — operationally interesting + auto-refreshing.
-	b.WriteString(s.renderVaultsSection())
+	// ----- Config: slow-changing chain parameters -----
+	b.WriteString(theme.Title.Render("Config"))
 	b.WriteString("\n")
-	// Live gas price — refreshes on the same 1s tick as the vaults.
-	b.WriteString(s.renderGasSection())
-	b.WriteString("\n")
-	// GasPriceOracle constants — small, static, sits between the live
-	// section and the slow-changing chain params for at-a-glance
-	// inspection alongside the fee scalars.
 	b.WriteString(s.renderGPOSection())
 	b.WriteString("\n")
-	// Latest block EIP-1559 params — one-shot decode of the Jovian
-	// extraData (the params actually in force on-chain), sitting next to
-	// SystemConfig's configured denominator/elasticity for comparison.
 	b.WriteString(s.renderBlockSection())
 	b.WriteString("\n")
-	// SystemConfig second — slow-changing chain params.
 	b.WriteString(s.renderSysCfgSection())
+
+	return b.String()
+}
+
+func (s readNetworkFeeScreen) View() string {
+	header := s.renderHeader()
+	footer := theme.Footer(theme.KeyScroll, theme.KeyTopBottom, theme.KeyRefresh, theme.KeyBack) +
+		theme.Help.Render(fmt.Sprintf(" · auto %s", vaultRefreshInterval))
+	body := s.renderBody()
+
+	// Before the first WindowSizeMsg there is no viewport to scroll
+	// within — render the whole thing top-to-bottom.
+	if s.width == 0 || s.height == 0 {
+		return header + "\n\n" + body + "\n" + footer
+	}
+
+	bodyLines := strings.Split(strings.TrimRight(body, "\n"), "\n")
+
+	// Rows for the scrolling body = total height minus the fixed header,
+	// the blank line under it, and the footer.
+	avail := s.height - rnfHeaderLines - 2
+	if avail < 1 {
+		avail = 1
+	}
+	off := clampInt(s.offset, 0, max0(len(bodyLines)-avail))
+	end := off + avail
+	if end > len(bodyLines) {
+		end = len(bodyLines)
+	}
+	visible := bodyLines[off:end]
+	for len(visible) < avail {
+		visible = append(visible, "")
+	}
+	return header + "\n\n" + strings.Join(visible, "\n") + "\n" + footer
+}
+
+// maxScrollOffset is the largest offset that still shows content on the
+// last line — used by the 'G'/'end' jump and the per-key clamp.
+func (s readNetworkFeeScreen) maxScrollOffset() int {
+	avail := s.height - rnfHeaderLines - 2
+	if avail < 1 {
+		avail = 1
+	}
+	bodyLines := strings.Count(strings.TrimRight(s.renderBody(), "\n"), "\n") + 1
+	return max0(bodyLines - avail)
+}
+
+// clampOffset keeps s.offset within [0, maxScrollOffset] after an
+// incremental scroll so j/k from a clamped position respond immediately
+// instead of walking back through a stale out-of-range value.
+func (s readNetworkFeeScreen) clampOffset() readNetworkFeeScreen {
+	s.offset = clampInt(s.offset, 0, s.maxScrollOffset())
+	return s
+}
+
+// rnfGasOracleColWidth pins the Gas Oracle column to a constant width.
+// Without this the column's width tracked its widest line, so a 1-digit
+// → 2-digit change in the latency/tick or a fee value reflowed the
+// column and visibly shifted the divider + Fee Vaults to its right every
+// second. The value comfortably exceeds the longest realistic line
+// (label padded to 22 + a ~13-digit gwei value, or the latency header).
+const rnfGasOracleColWidth = 48
+
+// renderLiveSection lays the two live groups out side by side —
+// [Gas Oracle] │ [Fee Vaults] — as plain text columns separated by a
+// vertical rule. The left column is fixed-width so the divider and Fee
+// Vaults stay put as values tick; the body still scrolls vertically and
+// overflows on terminals too narrow to hold both.
+func (s readNetworkFeeScreen) renderLiveSection() string {
+	gasOracle := lipgloss.NewStyle().Width(rnfGasOracleColWidth).
+		Render(strings.TrimRight(s.renderGasOracleSection(), "\n"))
+	feeVaults := strings.TrimRight(s.renderVaultsSection(), "\n")
+
+	// Vertical divider spanning the taller of the two columns.
+	h := lipgloss.Height(gasOracle)
+	if hv := lipgloss.Height(feeVaults); hv > h {
+		h = hv
+	}
+	bars := make([]string, h)
+	for i := range bars {
+		bars[i] = "│"
+	}
+	divider := lipgloss.NewStyle().Foreground(theme.ColorDim).Render(strings.Join(bars, "\n"))
+
+	row := lipgloss.JoinHorizontal(lipgloss.Top, gasOracle, "  ", divider, "  ", feeVaults)
+	return theme.Title.Render("Live") + "\n" + row
+}
+
+// renderGasOracleSection is the Live "Gas Oracle" group: the GasPrice
+// sub-block (live execution-gas suggestion, refreshed every tick) and
+// the L1 Data Fee sub-block (l1BaseFee / blobBaseFee from the
+// GasPriceOracle predeploy).
+func (s readNetworkFeeScreen) renderGasOracleSection() string {
+	var b strings.Builder
+	b.WriteString(theme.Header.Render("Gas Oracle"))
+	// Both sub-blocks ride the same tick, so the latency + tick indicator
+	// lives once on the group header rather than on each sub-header. The
+	// "<n>ms" token is right-padded to a fixed width so the "(tick #...)"
+	// label keeps its column as the latency value changes.
+	if s.gas != nil {
+		latTok := rnfPadRight(fmt.Sprintf("%dms", s.gas.Latency.Milliseconds()), 6)
+		b.WriteString(theme.Subtitle.Render(fmt.Sprintf("    latency: %s (tick #%d)", latTok, s.vaultGen)))
+	}
 	b.WriteString("\n")
 
-	b.WriteString(theme.Help.Render(fmt.Sprintf("auto-refresh %s · r refresh · q back", vaultRefreshInterval)))
+	// --- GasPrice: live, rides the 1s vault tick ---
+	b.WriteString("  ")
+	b.WriteString(theme.Section.Render("GasPrice"))
+	b.WriteString("\n")
+	switch {
+	case s.gasLoading && s.gas == nil:
+		b.WriteString(rnfIndentLine(4, theme.Subtitle.Render("loading ...")))
+	case s.gas == nil:
+		b.WriteString(rnfIndentLine(4, theme.ErrText.Render("ERR no data")))
+	default:
+		b.WriteString(rnfBigRow(4, "maxPriorityFeePerGas", s.gas.MaxPriorityFee, s.gas.Errors["maxPriorityFee"]))
+		// baseFee = gasPrice - maxPriorityFeePerGas; only meaningful when
+		// both inputs succeeded.
+		if s.gas.Errors["gasPrice"] != nil || s.gas.Errors["maxPriorityFee"] != nil {
+			b.WriteString(rnfErrRow(4, "baseFee", fmt.Errorf("needs gasPrice and maxPriorityFeePerGas")))
+		} else {
+			b.WriteString(rnfBigRow(4, "baseFee", s.gas.BaseFee, nil))
+		}
+	}
+
+	// --- L1 Data Fee: the live L1 cost inputs (l1BaseFee / blobBaseFee),
+	// polled each tick — separate from the one-shot GasPriceOracle params.
+	b.WriteString("  ")
+	b.WriteString(theme.Section.Render("L1 Data Fee"))
+	b.WriteString("\n")
+	switch {
+	case s.l1feeLoading && s.l1fee == nil:
+		b.WriteString(rnfIndentLine(4, theme.Subtitle.Render("loading ...")))
+	case s.l1fee == nil:
+		b.WriteString(rnfIndentLine(4, theme.ErrText.Render("ERR no data")))
+	default:
+		b.WriteString(rnfBigRow(4, "l1BaseFee", s.l1fee.L1BaseFee, s.l1fee.Errors["l1BaseFee"]))
+		b.WriteString(rnfBigRow(4, "blobBaseFee", s.l1fee.BlobBaseFee, s.l1fee.Errors["blobBaseFee"]))
+	}
 	return b.String()
+}
+
+// rnfIndentLine renders one already-styled string at the given indent.
+func rnfIndentLine(indent int, s string) string {
+	return strings.Repeat(" ", indent) + s + "\n"
+}
+
+// rnfBigRow / rnfErrRow are indent-aware label/value rows for the nested
+// Live sub-blocks (the flat Config rows use the indent-2 format*Row
+// helpers below).
+func rnfBigRow(indent int, label string, v *big.Int, e error) string {
+	if e != nil {
+		return rnfErrRow(indent, label, e)
+	}
+	return fmt.Sprintf("%s%s  %s\n",
+		strings.Repeat(" ", indent),
+		theme.Label.Render(padLabel(label)),
+		theme.Value.Render(bigOrZero(v)),
+	)
+}
+
+func rnfErrRow(indent int, label string, e error) string {
+	return fmt.Sprintf("%s%s  %s\n",
+		strings.Repeat(" ", indent),
+		theme.Label.Render(padLabel(label)),
+		theme.ErrText.Render(fmt.Sprintf("ERR %v", e)),
+	)
 }
 
 func (s readNetworkFeeScreen) renderVaultsSection() string {
@@ -438,41 +687,6 @@ func rnfPadRight(s string, width int) string {
 	return s + strings.Repeat(" ", width-len(s))
 }
 
-// renderGasSection prints the live gas suggestions (eth_gasPrice +
-// eth_maxPriorityFeePerGas) and the derived baseFee. Refreshes on the
-// vault tick, so it shows "loading ..." only until the first sample
-// lands and then updates in place every second.
-func (s readNetworkFeeScreen) renderGasSection() string {
-	var b strings.Builder
-	b.WriteString(theme.Header.Render("GasPrice"))
-	if s.gas != nil {
-		b.WriteString(theme.Subtitle.Render(fmt.Sprintf("    latency: %dms  (tick #%d)", s.gas.Latency.Milliseconds(), s.vaultGen)))
-	}
-	b.WriteString("\n")
-
-	if s.gasLoading && s.gas == nil {
-		b.WriteString(theme.Subtitle.Render("  loading ..."))
-		b.WriteString("\n")
-		return b.String()
-	}
-	snap := s.gas
-	if snap == nil {
-		b.WriteString(theme.ErrText.Render("  ERR no data"))
-		b.WriteString("\n")
-		return b.String()
-	}
-	b.WriteString(formatBigRow("gasPrice", snap.GasPrice, snap.Errors["gasPrice"]))
-	b.WriteString(formatBigRow("maxPriorityFeePerGas", snap.MaxPriorityFee, snap.Errors["maxPriorityFee"]))
-	// baseFee = gasPrice - maxPriorityFeePerGas; only meaningful when
-	// both inputs succeeded.
-	if snap.Errors["gasPrice"] != nil || snap.Errors["maxPriorityFee"] != nil {
-		b.WriteString(formatErrRow("baseFee", fmt.Errorf("needs gasPrice and maxPriorityFeePerGas")))
-	} else {
-		b.WriteString(formatBigRow("baseFee", snap.BaseFee, nil))
-	}
-	return b.String()
-}
-
 // renderGPOSection prints the GasPriceOracle compressed-size
 // regression constants (costIntercept / costFastlzCoef /
 // minTransactionSize) as a small key/value list. Same row formatting
@@ -499,11 +713,9 @@ func (s readNetworkFeeScreen) renderGPOSection() string {
 		}
 	}
 	snap := s.gpo
-	// Live Ecotone+ fee inputs first — public getters read via
-	// eth_call each refresh, the operationally interesting numbers.
-	b.WriteString(formatBigRow("baseFee", snap.BaseFee, snap.Errors["baseFee"]))
-	b.WriteString(formatBigRow("l1BaseFee", snap.L1BaseFee, snap.Errors["l1BaseFee"]))
-	b.WriteString(formatBigRow("blobBaseFee", snap.BlobBaseFee, snap.Errors["blobBaseFee"]))
+	// The live Ecotone+ fee inputs (baseFee / l1BaseFee / blobBaseFee)
+	// now live in the Live > Gas Oracle group; what remains here are the
+	// scaling parameters and pinned constants.
 	b.WriteString(formatU32Row("baseFeeScalar", snap.BaseFeeScalar, snap.Errors["baseFeeScalar"]))
 	b.WriteString(formatU32Row("blobBaseFeeScalar", snap.BlobBaseFeeScalar, snap.Errors["blobBaseFeeScalar"]))
 	b.WriteString(formatBigRow("decimals", snap.Decimals, snap.Errors["decimals"]))
