@@ -19,7 +19,7 @@ var configPath string
 var rootCmd = &cobra.Command{
 	Use:           "op-ctl",
 	Short:         "OP-Stack L2 paychain CLI",
-	Long:          "op-ctl inspects op-stack-based L2 paychain nodes defined in config.toml.",
+	Long:          "op-ctl inspects op-stack-based L2 paychain nodes. Chains are listed in config.yaml (next to the binary) and resolved to per-chain TOML configs.",
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	RunE:          runApp,
@@ -35,7 +35,7 @@ var rootCmd = &cobra.Command{
 // --backend ...`, etc.) bypass this entirely and run their own flows
 // — useful for scripting and the existing --plain output.
 func runApp(cmd *cobra.Command, _ []string) error {
-	path, candidates, err := resolveConfigPath(configPath, defaultConfigDir(), true)
+	path, candidates, err := resolveConfigPath(configPath, defaultConfigYAML(), true)
 	if err != nil {
 		return err
 	}
@@ -159,60 +159,65 @@ func defaultNamespaceDir(configPath string) string {
 	return filepath.Join(projectRoot, "namespace", chainNameFromConfigPath(configPath))
 }
 
-// defaultConfigDir returns the directory op-ctl scans for *.toml files
-// when --config is not given. It resolves to `config/` next to the
-// binary itself (via os.Executable) so an alias like
+// defaultConfigYAML returns the path to op-ctl's chain-registry file
+// (config.yaml) when --config is not given. It resolves to a sibling
+// of the binary itself (via os.Executable) so an alias like
 // `alias op-ctl='/path/to/op-ctl'` works from any cwd. Falls back to
-// the bare relative `config` when os.Executable fails.
-func defaultConfigDir() string {
+// the bare relative `config.yaml` when os.Executable fails.
+func defaultConfigYAML() string {
 	exe, err := os.Executable()
 	if err != nil {
-		return "config"
+		return "config.yaml"
 	}
-	return filepath.Join(filepath.Dir(exe), "config")
+	return filepath.Join(filepath.Dir(exe), "config.yaml")
 }
 
 // resolveConfigPath picks how op-ctl should load its TOML config. It
 // returns exactly one of `path` or `candidates` (never both):
 //
 //   - explicit != "" — returns explicit as `path`, candidates nil.
-//   - 0 discovered — returns err naming the discovery dir.
-//   - 1 discovered — returns that single file as `path`.
-//   - 2+ discovered && allowPicker — returns the candidate slice; the
+//   - 0 chains in yaml — returns err naming the yaml path.
+//   - 1 chain — returns that chain's TOML as `path`.
+//   - 2+ chains && allowPicker — returns the candidate slice; the
 //     caller is expected to drive an in-App picker (so picker and
 //     menu share one alt-screen — no flicker between them).
-//   - 2+ discovered && !allowPicker — returns err suggesting --config.
+//   - 2+ chains && !allowPicker — returns err suggesting --config.
 //
 // allowPicker is true only for the root TUI path. Subcommands are
 // scripting-facing and must surface a deterministic error instead.
-func resolveConfigPath(explicit, dir string, allowPicker bool) (path string, candidates []string, err error) {
+//
+// The chain registry lives at <yamlPath> (typically config.yaml next
+// to the binary): a YAML map of chain-name → { config: <toml path> }.
+// Relative paths inside resolve against the YAML file's directory.
+func resolveConfigPath(explicit, yamlPath string, allowPicker bool) (path string, candidates []config.ChainEntry, err error) {
 	if explicit != "" {
 		return explicit, nil, nil
 	}
-	paths, derr := config.DiscoverConfigs(dir)
+	chains, derr := config.DiscoverChains(yamlPath)
 	if derr != nil {
 		return "", nil, derr
 	}
 	switch {
-	case len(paths) == 0:
+	case len(chains) == 0:
 		return "", nil, fmt.Errorf(
-			"no *.toml config files found in %s; pass --config <path> or add one",
-			dir,
+			"no chains defined in %s; pass --config <path> or add an entry "+
+				"(map of <chain>: { config: <toml path> })",
+			yamlPath,
 		)
-	case len(paths) == 1:
-		return paths[0], nil, nil
+	case len(chains) == 1:
+		return chains[0].ConfigPath, nil, nil
 	}
 	if !allowPicker {
-		names := make([]string, len(paths))
-		for i, p := range paths {
-			names[i] = filepath.Base(p)
+		names := make([]string, len(chains))
+		for i, c := range chains {
+			names[i] = c.Name
 		}
 		return "", nil, fmt.Errorf(
-			"multiple configs found in %s: %s; pass `--config %s/<name>` to select one",
-			dir, strings.Join(names, ", "), filepath.Base(dir),
+			"multiple chains in %s: %s; pass --config <toml path> to select one",
+			yamlPath, strings.Join(names, ", "),
 		)
 	}
-	return "", paths, nil
+	return "", chains, nil
 }
 
 // loadResolvedConfig is the subcommand entry-point: resolves --config
@@ -221,7 +226,7 @@ func resolveConfigPath(explicit, dir string, allowPicker bool) (path string, can
 // invoked here — subcommands are scripting-facing, so an ambiguous
 // state surfaces as an error rather than blocking on a TTY prompt.
 func loadResolvedConfig() (*config.Config, error) {
-	path, _, err := resolveConfigPath(configPath, defaultConfigDir(), false)
+	path, _, err := resolveConfigPath(configPath, defaultConfigYAML(), false)
 	if err != nil {
 		return nil, err
 	}
@@ -231,7 +236,7 @@ func loadResolvedConfig() (*config.Config, error) {
 func init() {
 	rootCmd.PersistentFlags().StringVar(
 		&configPath, "config", "",
-		"path to TOML config defining [backends.*]; when empty, discovered from <binary>/config/ — if multiple matches found, an interactive picker selects one (subcommands error out instead and require --config)",
+		"path to TOML config defining [backends.*]; when empty, the chain is resolved from <binary>/config.yaml (a map of chain-name → { config: <toml path> }) — if it lists multiple chains, an interactive picker selects one (subcommands error out instead and require --config)",
 	)
 	rootCmd.AddCommand(namespaceCmd)
 	rootCmd.AddCommand(listCmd)

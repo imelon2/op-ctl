@@ -192,7 +192,7 @@ func Run(cobraRoot *cobra.Command, cfg *config.Config, resolver *sshtunnel.Resol
 // picker is replaced with the root cobra menu — all inside one
 // tea.Program so there is no alt-screen flicker between the two
 // phases.
-func NewWithPicker(cobraRoot *cobra.Command, candidates []string, loader configLoader) App {
+func NewWithPicker(cobraRoot *cobra.Command, candidates []config.ChainEntry, loader configLoader) App {
 	a := App{
 		cobra:  cobraRoot,
 		loader: loader,
@@ -204,7 +204,7 @@ func NewWithPicker(cobraRoot *cobra.Command, candidates []string, loader configL
 // RunWithPicker is the picker counterpart of Run. On success the
 // resolver built inside the loader is closed before returning so
 // callers don't need a separate cleanup defer for the picker path.
-func RunWithPicker(ctx context.Context, cobraRoot *cobra.Command, candidates []string, loader configLoader) error {
+func RunWithPicker(ctx context.Context, cobraRoot *cobra.Command, candidates []config.ChainEntry, loader configLoader) error {
 	final, err := tea.NewProgram(
 		NewWithPicker(cobraRoot, candidates, loader),
 		tea.WithAltScreen(),
