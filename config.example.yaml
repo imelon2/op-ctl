@@ -1,0 +1,5 @@
+testnet:
+  config: ./config/config.testnet.toml
+
+local-testnet:
+  config: ./config/config.local-testnet.toml

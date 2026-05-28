@@ -40,3 +40,4 @@ coverage.html
 # Local env files
 .env
 .env.local
+config.yaml
