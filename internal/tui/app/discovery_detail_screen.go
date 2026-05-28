@@ -4,9 +4,9 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"op-ctl/internal/config"
+	"op-ctl/internal/tui/theme"
 )
 
 // discoveryDetailScreen renders one ENR from the discovery table in
@@ -59,23 +59,10 @@ func (s discoveryDetailScreen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return s, nil
 }
 
-var (
-	ddTitleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	ddSubtitleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	ddLabelStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	ddValueStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
-	ddNameStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14"))
-	ddMuteStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	ddHelpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
-
-	ddBadgeBase    = lipgloss.NewStyle().Padding(0, 1).Bold(true).Foreground(lipgloss.Color("0"))
-	ddBadgeMatched = ddBadgeBase.Background(lipgloss.Color("10"))
-)
-
 func (s discoveryDetailScreen) View() string {
 	header := s.renderHeader()
 	body := s.renderBody()
-	footer := ddHelpStyle.Render("j/k ↑/↓ scroll · g/G top/bottom · q back")
+	footer := theme.Footer(theme.KeyScroll, theme.KeyTopBottom, theme.KeyBack)
 
 	if s.width == 0 || s.height == 0 {
 		return header + "\n" + body + "\n" + footer
@@ -110,12 +97,12 @@ func (s discoveryDetailScreen) View() string {
 }
 
 func (s discoveryDetailScreen) renderHeader() string {
-	title := ddTitleStyle.Render("discovery entry")
+	title := theme.Title.Render("discovery entry")
 	matchBadge := ""
 	if s.name != "" {
-		matchBadge = "  " + ddBadgeMatched.Render(" "+s.name+" ")
+		matchBadge = "  " + theme.OKBadge.Render(" "+s.name+" ")
 	}
-	src := ddSubtitleStyle.Render("from " + s.backend.Name + " · " + s.backend.ConsensusRPCURL)
+	src := theme.Subtitle.Render("from " + s.backend.Name + " · " + s.backend.ConsensusRPCURL)
 	return title + matchBadge + "\n" + src
 }
 
@@ -123,14 +110,14 @@ func (s discoveryDetailScreen) renderBody() string {
 	var b strings.Builder
 	b.WriteString("\n")
 	if s.name != "" {
-		b.WriteString("  " + ddLabelStyle.Render(padRight("namespace name", 16)) + "  " +
-			ddNameStyle.Render(s.name) + "\n")
+		b.WriteString("  " + theme.Label.Render(padRight("namespace name", 16)) + "  " +
+			theme.Name.Render(s.name) + "\n")
 	} else {
-		b.WriteString("  " + ddLabelStyle.Render(padRight("namespace name", 16)) + "  " +
-			ddMuteStyle.Render("(unknown — no matching consensus.enr in namespace dir)") + "\n")
+		b.WriteString("  " + theme.Label.Render(padRight("namespace name", 16)) + "  " +
+			theme.Mute.Render("(unknown — no matching consensus.enr in namespace dir)") + "\n")
 	}
 	b.WriteString("\n")
-	b.WriteString("  " + ddLabelStyle.Render("enr") + "\n")
+	b.WriteString("  " + theme.Label.Render("enr") + "\n")
 
 	// ENRs are 200-300 chars and don't have natural break points, so
 	// we wrap on a fixed column width tied to the terminal. Trailing
@@ -140,7 +127,7 @@ func (s discoveryDetailScreen) renderBody() string {
 		wrapW = 40
 	}
 	for _, line := range chunk(s.enr, wrapW) {
-		b.WriteString("    " + ddValueStyle.Render(line) + "\n")
+		b.WriteString("    " + theme.Value.Render(line) + "\n")
 	}
 	return b.String()
 }

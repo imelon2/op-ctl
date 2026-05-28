@@ -13,6 +13,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"op-ctl/internal/tui/theme"
 )
 
 // Item is one menu row: the command name (returned to the caller as the
@@ -96,20 +98,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 var (
-	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	cursorStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
 	selectedStyle = lipgloss.NewStyle().Bold(true)
-	dimStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
 )
 
 func (m Model) View() string {
 	var b strings.Builder
 	if m.title != "" {
-		b.WriteString(titleStyle.Render(m.title) + "\n\n")
+		b.WriteString(theme.Title.Render(m.title) + "\n\n")
 	} else {
-		b.WriteString(titleStyle.Render("op-ctl") + "\n")
-		b.WriteString(dimStyle.Render("select a command") + "\n\n")
+		b.WriteString(theme.Title.Render("op-ctl") + "\n")
+		b.WriteString(theme.Label.Render("select a command") + "\n\n")
 	}
 
 	nameWidth := 0
@@ -121,9 +119,9 @@ func (m Model) View() string {
 
 	for i, it := range m.items {
 		name := it.Name + strings.Repeat(" ", nameWidth-lipgloss.Width(it.Name))
-		short := dimStyle.Render(it.Short)
+		short := theme.Label.Render(it.Short)
 		if i == m.cursor {
-			b.WriteString(cursorStyle.Render("▸ "))
+			b.WriteString(theme.Cursor.Render("▸ "))
 			b.WriteString(selectedStyle.Render(name))
 		} else {
 			b.WriteString("  " + name)
@@ -131,7 +129,7 @@ func (m Model) View() string {
 		b.WriteString("  " + short + "\n")
 	}
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("↑/↓ or j/k move · enter run · q/esc quit"))
+	b.WriteString(theme.Footer(theme.KeyNav, theme.Key{Keys: "⏎", Desc: "run"}, theme.KeyQuit))
 	b.WriteString("\n")
 	return b.String()
 }

@@ -10,7 +10,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+
+	"op-ctl/internal/tui/theme"
 )
 
 // DoneMsg is emitted when the operator dismisses the error overlay.
@@ -44,13 +45,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-var (
-	border    = lipgloss.RoundedBorder()
-	box       = lipgloss.NewStyle().Border(border).BorderForeground(lipgloss.Color("9")).Padding(1, 2)
-	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9"))
-	hintStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
-)
-
 func (m Model) View() string {
 	if m.width == 0 || m.height == 0 {
 		return m.msg
@@ -60,8 +54,8 @@ func (m Model) View() string {
 		innerW = 20
 	}
 	body := wrap(m.msg, innerW)
-	content := titleStyle.Render("Error") + "\n\n" + body + "\n\n" + hintStyle.Render("press any key to continue")
-	return box.Width(innerW).Render(content)
+	content := theme.ErrTitle.Render("Error") + "\n\n" + body + "\n\n" + theme.Help.Render("press any key to continue")
+	return theme.ErrorBox.Width(innerW).Render(content)
 }
 
 // wrap is a minimal width-based word wrap. lipgloss has no built-in

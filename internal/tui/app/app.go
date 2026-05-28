@@ -34,6 +34,7 @@ import (
 	"op-ctl/internal/tui/errscreen"
 	"op-ctl/internal/tui/menu"
 	peerstui "op-ctl/internal/tui/peers"
+	"op-ctl/internal/tui/theme"
 )
 
 // backendKind tags a backend menu so the same selector widget can be
@@ -797,10 +798,8 @@ func (s loadingScreen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return s, nil
 }
 
-var loadingStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-
 func (s loadingScreen) View() string {
-	body := loadingStyle.Render("⏳ " + s.title)
+	body := theme.Title.Render("⏳ " + s.title)
 	if s.width == 0 || s.height == 0 {
 		return body
 	}
@@ -849,14 +848,9 @@ func (s textScreen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return s, nil
 }
 
-var (
-	textTitleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	textHelpStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
-)
-
 func (s textScreen) View() string {
-	header := textTitleStyle.Render(s.title) + "\n\n"
-	footer := textHelpStyle.Render("j/k ↑/↓ scroll · g/G top/bottom · q back")
+	header := theme.Title.Render(s.title) + "\n\n"
+	footer := theme.Footer(theme.KeyScroll, theme.KeyTopBottom, theme.KeyBack)
 
 	if s.width == 0 || s.height == 0 {
 		return header + s.body + "\n" + footer
@@ -993,7 +987,6 @@ func runDiscoveryCmd(resolver *sshtunnel.Resolver, b config.Backend, timeout tim
 		return discoveryFetchedMsg{backend: b, enrs: enrs, err: err}
 	}
 }
-
 
 // ---------- helpers ----------
 

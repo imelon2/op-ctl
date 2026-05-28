@@ -6,11 +6,11 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"op-ctl/internal/config"
 	"op-ctl/internal/namespace"
 	"op-ctl/internal/opnode"
+	"op-ctl/internal/tui/theme"
 )
 
 // discoveryConsensusScreen renders the result of opp2p_discoveryTable
@@ -111,28 +111,6 @@ func (s discoveryConsensusScreen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return s, nil
 }
 
-// ---------- styles ----------
-
-var (
-	dscTitleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	dscURLStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	dscLabelStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	dscValueStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
-	dscNameStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14"))
-	dscDimNameStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	dscMuteStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	dscHelpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
-	dscIndexStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
-	dscCursorStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	dscSelectedBg    = lipgloss.NewStyle().Background(lipgloss.Color("237"))
-	dscErrTitleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9"))
-	dscErrTextStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-
-	dscBadgeBase = lipgloss.NewStyle().Padding(0, 1).Bold(true).Foreground(lipgloss.Color("0"))
-	dscBadgeOK   = dscBadgeBase.Background(lipgloss.Color("10"))
-	dscBadgeWarn = dscBadgeBase.Background(lipgloss.Color("11"))
-)
-
 const (
 	dscIdxColW  = 5
 	dscNameColW = 14
@@ -144,7 +122,7 @@ func (s discoveryConsensusScreen) View() string {
 	}
 	header := s.renderHeader()
 	body, cursorLine := s.renderBody()
-	footer := dscHelpStyle.Render("↑/↓ j/k navigate · enter detail · q back")
+	footer := theme.Footer(theme.KeyNav, theme.KeyOpenDetail, theme.KeyBack)
 
 	headerLines := strings.Split(header, "\n")
 	avail := s.height - len(headerLines) - 1
@@ -192,26 +170,26 @@ func (s discoveryConsensusScreen) renderHeader() string {
 	}
 
 	var b strings.Builder
-	b.WriteString(dscTitleStyle.Render(s.backend.Name) + "  " +
-		dscURLStyle.Render(s.backend.ConsensusRPCURL) + "\n")
+	b.WriteString(theme.Title.Render(s.backend.Name) + "  " +
+		theme.Subtitle.Render(s.backend.ConsensusRPCURL) + "\n")
 
-	totalCell := dscValueStyle.Render(fmt.Sprintf("%d", len(s.rows)))
+	totalCell := theme.Value.Render(fmt.Sprintf("%d", len(s.rows)))
 	if s.err != nil {
 		if opnode.IsDiscoveryDisabled(s.err) {
-			totalCell = dscBadgeWarn.Render(" discovery disabled ")
+			totalCell = theme.WarnBadge.Render(" discovery disabled ")
 		} else {
-			totalCell = dscErrTextStyle.Render("✕ " + s.err.Error())
+			totalCell = theme.ErrText.Render("✕ " + s.err.Error())
 		}
 	}
-	b.WriteString("  " + dscLabelStyle.Render(padRight("total entries", 16)) + "  " + totalCell + "\n")
+	b.WriteString("  " + theme.Label.Render(padRight("total entries", 16)) + "  " + totalCell + "\n")
 
 	if s.err == nil {
-		matchedCell := dscValueStyle.Render(fmt.Sprintf("%d", matched))
+		matchedCell := theme.Value.Render(fmt.Sprintf("%d", matched))
 		if matched > 0 {
-			matchedCell = dscBadgeOK.Render(fmt.Sprintf(" %d ", matched)) + " " +
-				dscMuteStyle.Render("of "+fmt.Sprintf("%d", len(s.rows))+" matched namespace")
+			matchedCell = theme.OKBadge.Render(fmt.Sprintf(" %d ", matched)) + " " +
+				theme.Mute.Render("of "+fmt.Sprintf("%d", len(s.rows))+" matched namespace")
 		}
-		b.WriteString("  " + dscLabelStyle.Render(padRight("matched", 16)) + "  " + matchedCell + "\n")
+		b.WriteString("  " + theme.Label.Render(padRight("matched", 16)) + "  " + matchedCell + "\n")
 	}
 	return b.String()
 }
@@ -221,7 +199,7 @@ func (s discoveryConsensusScreen) renderBody() (string, int) {
 		return s.renderError(), -1
 	}
 	if len(s.rows) == 0 {
-		return "\n  " + dscMuteStyle.Render("(discovery table is empty)"), -1
+		return "\n  " + theme.Mute.Render("(discovery table is empty)"), -1
 	}
 	return s.renderRows()
 }
@@ -230,22 +208,22 @@ func (s discoveryConsensusScreen) renderError() string {
 	var b strings.Builder
 	b.WriteString("\n")
 	if opnode.IsDiscoveryDisabled(s.err) {
-		b.WriteString("  " + dscErrTitleStyle.Render("discovery disabled") + "\n\n")
-		b.WriteString("  " + dscMuteStyle.Render(s.err.Error()) + "\n\n")
-		b.WriteString("  " + dscValueStyle.Render(
+		b.WriteString("  " + theme.ErrTitle.Render("discovery disabled") + "\n\n")
+		b.WriteString("  " + theme.Mute.Render(s.err.Error()) + "\n\n")
+		b.WriteString("  " + theme.Value.Render(
 			"This op-node is running with discovery turned off, so") + "\n")
-		b.WriteString("  " + dscValueStyle.Render(
+		b.WriteString("  " + theme.Value.Render(
 			"opp2p_discoveryTable can't return any ENRs.") + "\n\n")
-		b.WriteString("  " + dscLabelStyle.Render("To re-enable on op-node:") + "\n")
-		b.WriteString("  " + dscValueStyle.Render(
+		b.WriteString("  " + theme.Label.Render("To re-enable on op-node:") + "\n")
+		b.WriteString("  " + theme.Value.Render(
 			"  drop --p2p.no-discovery (default behavior is on)") + "\n")
-		b.WriteString("  " + dscValueStyle.Render(
+		b.WriteString("  " + theme.Value.Render(
 			"  ensure --p2p.priv.path / --p2p.priv.raw is set") + "\n")
-		b.WriteString("  " + dscValueStyle.Render(
+		b.WriteString("  " + theme.Value.Render(
 			"  ensure UDP port (default 9003) is reachable") + "\n")
 	} else {
-		b.WriteString("  " + dscErrTitleStyle.Render("opp2p_discoveryTable failed") + "\n\n")
-		b.WriteString("  " + dscErrTextStyle.Render(s.err.Error()) + "\n")
+		b.WriteString("  " + theme.ErrTitle.Render("opp2p_discoveryTable failed") + "\n\n")
+		b.WriteString("  " + theme.ErrText.Render(s.err.Error()) + "\n")
 	}
 	return b.String()
 }
@@ -261,23 +239,23 @@ func (s discoveryConsensusScreen) renderRows() (string, int) {
 	cursorLine := -1
 	lineNo := 1
 	for i, r := range s.rows {
-		idxCell := dscIndexStyle.Render(padRight(fmt.Sprintf("#%d", i+1), dscIdxColW))
+		idxCell := theme.WarnText.Render(padRight(fmt.Sprintf("#%d", i+1), dscIdxColW))
 		var nameCell string
 		if r.name != "" {
-			nameCell = dscNameStyle.Render(padTrunc(r.name, dscNameColW))
+			nameCell = theme.Name.Render(padTrunc(r.name, dscNameColW))
 		} else {
-			nameCell = dscDimNameStyle.Render(padTrunc("·", dscNameColW))
+			nameCell = theme.Mute.Render(padTrunc("·", dscNameColW))
 		}
-		enrCell := dscValueStyle.Render(padTrunc(shrinkENR(r.enr, enrW), enrW))
+		enrCell := theme.Value.Render(padTrunc(shrinkENR(r.enr, enrW), enrW))
 
 		cursor := "  "
 		if i == s.cursor {
-			cursor = dscCursorStyle.Render("▸ ")
+			cursor = theme.Cursor.Render("▸ ")
 			cursorLine = lineNo
 		}
 		row := cursor + idxCell + " " + nameCell + " " + enrCell
 		if i == s.cursor {
-			row = dscSelectedBg.Render(row)
+			row = theme.SelectedRow.Render(row)
 		}
 		b.WriteString("  " + row + "\n")
 		lineNo++

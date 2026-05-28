@@ -13,6 +13,7 @@ import (
 	"op-ctl/internal/config"
 	"op-ctl/internal/opnode"
 	"op-ctl/internal/sshtunnel"
+	"op-ctl/internal/tui/theme"
 )
 
 // stateBlockScreen drives `op-ctl state block`: every `interval` it
@@ -29,15 +30,15 @@ import (
 // display. See the Init() invariant comment block below for the exact
 // rule.
 type stateBlockScreen struct {
-	backends     []config.Backend
-	resolver     *sshtunnel.Resolver
-	interval     time.Duration
-	timeout      time.Duration
-	l2BlockTime  time.Duration        // L2 block time used by the Indicator section.
-	snapshots    []stateBlockSnapshot // len == len(backends); zero-value pending=true
-	gen          uint64               // last accepted tick generation
-	width        int
-	height       int
+	backends    []config.Backend
+	resolver    *sshtunnel.Resolver
+	interval    time.Duration
+	timeout     time.Duration
+	l2BlockTime time.Duration        // L2 block time used by the Indicator section.
+	snapshots   []stateBlockSnapshot // len == len(backends); zero-value pending=true
+	gen         uint64               // last accepted tick generation
+	width       int
+	height      int
 }
 
 // stateBlockSnapshot is one backend's most-recent optimism_syncStatus
@@ -235,23 +236,6 @@ func buildIndicators(l2BlockTime time.Duration) []indicator {
 	}
 }
 
-// ---------- styles ----------
-
-var (
-	sbTitleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	sbSubtitleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	sbHelpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
-
-	sbSectionStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13"))
-	sbBackendStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14"))
-	sbLabelStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	sbValueStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
-	sbHeadStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("10"))
-	sbErrTextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-	sbPendingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
-	sbOKStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
-)
-
 const sbNameColW = 18
 
 // View renders the two stacked sections. Each section computes its
@@ -262,27 +246,27 @@ const sbNameColW = 18
 func (s stateBlockScreen) View() string {
 	var b strings.Builder
 
-	b.WriteString(sbTitleStyle.Render("state · block · sync status") + "  ")
-	b.WriteString(sbSubtitleStyle.Render(fmt.Sprintf(
+	b.WriteString(theme.Title.Render("state · block · sync status") + "  ")
+	b.WriteString(theme.Subtitle.Render(fmt.Sprintf(
 		"interval=%s  timeout=%s  backends=%d",
 		s.interval, s.timeout, len(s.backends),
 	)))
 	b.WriteString("\n\n")
 
-	b.WriteString(sbSectionStyle.Render("Layer 2") + "\n")
+	b.WriteString(theme.Section.Render("Layer 2") + "\n")
 	s.renderSection(&b, l2Columns)
 	b.WriteString("\n")
-	b.WriteString(sbSectionStyle.Render("Layer 1") + "\n")
+	b.WriteString(theme.Section.Render("Layer 1") + "\n")
 	s.renderSection(&b, l1Columns)
 
 	if lines := s.renderIndicators(); lines != "" {
 		b.WriteString("\n")
-		b.WriteString(sbSectionStyle.Render("Indicator") + "\n")
+		b.WriteString(theme.Section.Render("Indicator") + "\n")
 		b.WriteString(lines)
 	}
 
 	b.WriteString("\n")
-	b.WriteString(sbHelpStyle.Render("q quits · live updates every " + s.interval.String()))
+	b.WriteString(theme.Help.Render("q quits · live updates every " + s.interval.String()))
 	return b.String()
 }
 
@@ -343,8 +327,8 @@ func (s stateBlockScreen) renderIndicators() string {
 		// other regardless of magnitude (e.g., 4 vs 1055).
 		valueText := fmt.Sprintf("%*s ( %s )", maxGapW, r.gapStr, r.timeStr)
 		b.WriteString("  ")
-		b.WriteString(sbLabelStyle.Render(labelText))
-		b.WriteString(sbValueStyle.Render(valueText))
+		b.WriteString(theme.Label.Render(labelText))
+		b.WriteString(theme.Value.Render(valueText))
 		b.WriteString("\n")
 	}
 	return b.String()
@@ -417,13 +401,13 @@ func (s stateBlockScreen) renderSection(b *strings.Builder, cols []syncColumn) {
 					lag := heads[ci] - n
 					text = fmt.Sprintf("%d(%d)", n, lag)
 					if lag == 0 {
-						styled = sbHeadStyle.Render(text)
+						styled = theme.Header.Render(text)
 					} else {
-						styled = sbValueStyle.Render(text)
+						styled = theme.Value.Render(text)
 					}
 				} else {
 					text = fmt.Sprintf("%d(?)", n)
-					styled = sbValueStyle.Render(text)
+					styled = theme.Value.Render(text)
 				}
 			}
 			row[ci] = cell{text: text, styled: styled}
@@ -436,40 +420,40 @@ func (s stateBlockScreen) renderSection(b *strings.Builder, cols []syncColumn) {
 
 	// Header row.
 	b.WriteString("  ")
-	b.WriteString(padTrunc(sbLabelStyle.Render("backend"), sbNameColW))
+	b.WriteString(padTrunc(theme.Label.Render("backend"), sbNameColW))
 	for ci, col := range cols {
 		b.WriteString("  ")
-		b.WriteString(padTrunc(sbLabelStyle.Render(col.name), colWidths[ci]))
+		b.WriteString(padTrunc(theme.Label.Render(col.name), colWidths[ci]))
 	}
 	b.WriteString("\n")
 
 	// Per-backend rows.
 	for ri, snap := range s.snapshots {
-		name := sbBackendStyle.Render(s.backends[ri].Name)
+		name := theme.Name.Render(s.backends[ri].Name)
 		b.WriteString("  ")
 		b.WriteString(padTrunc(name, sbNameColW))
 		switch {
 		case snap.pending:
 			b.WriteString("  ")
-			b.WriteString(sbPendingStyle.Render("polling…"))
+			b.WriteString(theme.Pending.Render("polling…"))
 		case snap.err != nil:
 			b.WriteString("  ")
-			b.WriteString(sbErrTextStyle.Render("ERR " + truncate(snap.err.Error(), 80)))
+			b.WriteString(theme.ErrText.Render("ERR " + truncate(snap.err.Error(), 80)))
 		case snap.status == nil:
 			// Defensive: shouldn't happen given the snapshot
 			// invariant (status set iff err == nil), but renders a
 			// recognizable bug-report-friendly marker if it ever does.
 			b.WriteString("  ")
-			b.WriteString(sbErrTextStyle.Render("ERR (nil status)"))
+			b.WriteString(theme.ErrText.Render("ERR (nil status)"))
 		default:
 			for ci := range cols {
 				b.WriteString("  ")
 				b.WriteString(padTrunc(rows[ri][ci].styled, colWidths[ci]))
 			}
 			b.WriteString("  ")
-			b.WriteString(sbLabelStyle.Render(fmt.Sprintf("%dms", snap.latency/time.Millisecond)))
+			b.WriteString(theme.Label.Render(fmt.Sprintf("%dms", snap.latency/time.Millisecond)))
 			b.WriteString("  ")
-			b.WriteString(sbOKStyle.Render("✓"))
+			b.WriteString(theme.OKText.Render("✓"))
 		}
 		b.WriteString("\n")
 	}

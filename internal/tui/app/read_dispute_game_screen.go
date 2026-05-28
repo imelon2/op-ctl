@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss/table"
 
 	"op-ctl/internal/l1"
+	"op-ctl/internal/tui/theme"
 )
 
 // rowsPerPage is the gameAtIndex batch size: one HTTP POST fetches
@@ -82,13 +83,13 @@ type readDisputeGameScreen struct {
 	countErr      error
 	headerLatency time.Duration
 
-	page          int
-	pageLoading   bool
-	pageGen       uint64 // bumped each fetch; stale responses ignored
-	pageRows      []l1.GameListing
-	pageErrs      []error
-	pageHardErr   error
-	pageLatency   time.Duration
+	page        int
+	pageLoading bool
+	pageGen     uint64 // bumped each fetch; stale responses ignored
+	pageRows    []l1.GameListing
+	pageErrs    []error
+	pageHardErr error
+	pageLatency time.Duration
 
 	cursor int
 
@@ -311,26 +312,21 @@ func max0(n int) int {
 
 // --- view ---
 
-// Visual styles for the list view. Kept terse and reuse-friendly:
-// `Padding(0, 1)` on every cell style is what gives lipgloss/table its
+// Table cell styles for the list view. These stay as named styles
+// because tableStyleFunc returns them per (row, col); the colors come
+// from the shared theme, with `Padding(0, 1)` for lipgloss/table's
 // one-space breathing room inside each border-separated cell.
 var (
-	rdgListTitleStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	rdgListMutedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	rdgListHeaderStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("10"))
-	rdgListErrStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-	rdgListHelpStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
-	rdgListBorderStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	rdgListCellStyle    = lipgloss.NewStyle().Padding(0, 1)
-	rdgListColHeaderStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12")).Padding(0, 1)
-	rdgListIdxColStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Padding(0, 1)
-	rdgListAddrStyle    = lipgloss.NewStyle().Padding(0, 1)
-	rdgListAgeStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Padding(0, 1)
-	rdgListSelectStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Background(lipgloss.Color("12")).Padding(0, 1)
+	rdgListCellStyle      = lipgloss.NewStyle().Padding(0, 1)
+	rdgListAddrStyle      = lipgloss.NewStyle().Padding(0, 1)
+	rdgListColHeaderStyle = theme.ColHeader.Padding(0, 1)
+	rdgListIdxColStyle    = theme.Label.Padding(0, 1)
+	rdgListAgeStyle       = theme.Label.Padding(0, 1)
+	rdgListSelectStyle    = theme.SelectedCell.Padding(0, 1)
 	// gameType pills: 0 = Cannon (Permissionless), 1 = Permissioned.
-	rdgListTypePermStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("11")).Padding(0, 1)
-	rdgListTypeOpenStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("10")).Padding(0, 1)
-	rdgListTypeUnkStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Padding(0, 1)
+	rdgListTypePermStyle = theme.WarnText.Bold(true).Padding(0, 1)
+	rdgListTypeOpenStyle = theme.OKText.Bold(true).Padding(0, 1)
+	rdgListTypeUnkStyle  = theme.Label.Padding(0, 1)
 )
 
 func (s readDisputeGameScreen) View() string {
@@ -340,11 +336,11 @@ func (s readDisputeGameScreen) View() string {
 	// separate lines because public RPC URLs are long and combining
 	// them with the factory pushed the header off-screen on narrower
 	// terminals.
-	b.WriteString(rdgListTitleStyle.Render("read / dispute-game"))
+	b.WriteString(theme.Title.Render("read / dispute-game"))
 	b.WriteString("\n")
-	b.WriteString(rdgListMutedStyle.Render("L1:      " + s.l1RPCURL))
+	b.WriteString(theme.Subtitle.Render("L1:      " + s.l1RPCURL))
 	b.WriteString("\n")
-	b.WriteString(rdgListMutedStyle.Render("Factory: " + s.factoryAddr))
+	b.WriteString(theme.Subtitle.Render("Factory: " + s.factoryAddr))
 	b.WriteString("\n")
 
 	// Status line: version + gameCount as inline highlights — keeps
@@ -356,13 +352,13 @@ func (s readDisputeGameScreen) View() string {
 	// Body: empty-state / loading / hard-error / table
 	switch {
 	case s.headerLoading:
-		b.WriteString(rdgListMutedStyle.Render("  loading factory header ..."))
+		b.WriteString(theme.Subtitle.Render("  loading factory header ..."))
 	case s.count != nil && s.count.Sign() == 0:
-		b.WriteString(rdgListMutedStyle.Render("  (no games created yet)"))
+		b.WriteString(theme.Subtitle.Render("  (no games created yet)"))
 	case s.pageLoading && len(s.pageRows) == 0:
-		b.WriteString(rdgListMutedStyle.Render("  loading page ..."))
+		b.WriteString(theme.Subtitle.Render("  loading page ..."))
 	case s.pageHardErr != nil:
-		b.WriteString(rdgListErrStyle.Render(fmt.Sprintf("  ERR loading page: %v", s.pageHardErr)))
+		b.WriteString(theme.ErrText.Render(fmt.Sprintf("  ERR loading page: %v", s.pageHardErr)))
 	default:
 		b.WriteString(s.renderGameTable())
 	}
@@ -374,9 +370,9 @@ func (s readDisputeGameScreen) View() string {
 	if totalP == 0 {
 		pageInfo = "page —"
 	}
-	b.WriteString(rdgListMutedStyle.Render(pageInfo))
+	b.WriteString(theme.Subtitle.Render(pageInfo))
 	b.WriteString("\n")
-	b.WriteString(rdgListHelpStyle.Render("↑↓ select · ⏎ open · PgDn/→ next · PgUp/← prev · g/G top/bottom · r refresh · q back"))
+	b.WriteString(theme.Help.Render("↑↓ select · ⏎ open · PgDn/→ next · PgUp/← prev · g/G top/bottom · r refresh · q back"))
 
 	return b.String()
 }
@@ -387,24 +383,24 @@ func (s readDisputeGameScreen) View() string {
 // failed without scrolling.
 func (s readDisputeGameScreen) renderStatusLine() string {
 	if s.headerLoading {
-		return rdgListMutedStyle.Render("⏳ fetching factory version + gameCount ...")
+		return theme.Subtitle.Render("⏳ fetching factory version + gameCount ...")
 	}
 	var parts []string
 	if s.versionErr != nil {
-		parts = append(parts, rdgListErrStyle.Render("version: ERR "+s.versionErr.Error()))
+		parts = append(parts, theme.ErrText.Render("version: ERR "+s.versionErr.Error()))
 	} else {
-		parts = append(parts, rdgListMutedStyle.Render("version: ")+rdgListHeaderStyle.Render(s.version))
+		parts = append(parts, theme.Subtitle.Render("version: ")+theme.Header.Render(s.version))
 	}
 	if s.countErr != nil {
-		parts = append(parts, rdgListErrStyle.Render("gameCount: ERR "+s.countErr.Error()))
+		parts = append(parts, theme.ErrText.Render("gameCount: ERR "+s.countErr.Error()))
 	} else {
 		cs := "0"
 		if s.count != nil {
 			cs = s.count.String()
 		}
-		parts = append(parts, rdgListMutedStyle.Render("gameCount: ")+rdgListHeaderStyle.Render(cs))
+		parts = append(parts, theme.Subtitle.Render("gameCount: ")+theme.Header.Render(cs))
 	}
-	return strings.Join(parts, rdgListMutedStyle.Render("  ·  "))
+	return strings.Join(parts, theme.Subtitle.Render("  ·  "))
 }
 
 // renderGameTable builds the lipgloss/table for the current page.
@@ -433,7 +429,7 @@ func (s readDisputeGameScreen) renderGameTable() string {
 	}
 	t := table.New().
 		Border(lipgloss.NormalBorder()).
-		BorderStyle(rdgListBorderStyle).
+		BorderStyle(theme.Mute).
 		BorderRow(false).
 		BorderColumn(true).
 		BorderTop(true).

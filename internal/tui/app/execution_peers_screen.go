@@ -6,11 +6,11 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"op-ctl/internal/config"
 	"op-ctl/internal/elnode"
 	"op-ctl/internal/namespace"
+	"op-ctl/internal/tui/theme"
 )
 
 // executionPeersScreen renders the result of admin_peers + net_peerCount
@@ -126,30 +126,6 @@ func (s executionPeersScreen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return s, nil
 }
 
-// ---------- styles ----------
-
-var (
-	exTitleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	exURLStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	exLabelStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	exValueStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
-	exNameStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14"))
-	exDimNameStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	exMuteStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	exHelpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
-	exDirInStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
-	exDirOutStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("13"))
-	exCursorStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	exSelectedBgStyle = lipgloss.NewStyle().Background(lipgloss.Color("237"))
-	exErrTitleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9"))
-	exErrTextStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-
-	exBadgeBase   = lipgloss.NewStyle().Padding(0, 1).Bold(true).Foreground(lipgloss.Color("0"))
-	exBadgeOK     = exBadgeBase.Background(lipgloss.Color("10"))
-	exBadgeWarn   = exBadgeBase.Background(lipgloss.Color("11"))
-	exBadgeErr    = exBadgeBase.Background(lipgloss.Color("9"))
-)
-
 const (
 	exNameColW    = 14
 	exVersionColW = 22
@@ -164,7 +140,7 @@ func (s executionPeersScreen) View() string {
 	}
 	header := s.renderHeader()
 	body, cursorLine := s.renderBody()
-	footer := exHelpStyle.Render("↑/↓ j/k navigate · enter detail · q back")
+	footer := theme.Footer(theme.KeyNav, theme.KeyOpenDetail, theme.KeyBack)
 
 	headerLines := strings.Split(header, "\n")
 	avail := s.height - len(headerLines) - 1
@@ -208,24 +184,24 @@ func (s executionPeersScreen) View() string {
 // which call worked and which didn't.
 func (s executionPeersScreen) renderHeader() string {
 	var b strings.Builder
-	b.WriteString(exTitleStyle.Render(s.backend.Name) + "  " +
-		exURLStyle.Render(s.backend.ExecutionRPCURL) + "\n")
+	b.WriteString(theme.Title.Render(s.backend.Name) + "  " +
+		theme.Subtitle.Render(s.backend.ExecutionRPCURL) + "\n")
 
-	countCell := exValueStyle.Render(fmt.Sprintf("%d", s.count))
+	countCell := theme.Value.Render(fmt.Sprintf("%d", s.count))
 	if s.countErr != nil {
-		countCell = exErrTextStyle.Render("✕ " + s.countErr.Error())
+		countCell = theme.ErrText.Render("✕ " + s.countErr.Error())
 	}
-	b.WriteString("  " + exLabelStyle.Render(padRight("net_peerCount", 16)) + "  " + countCell + "\n")
+	b.WriteString("  " + theme.Label.Render(padRight("net_peerCount", 16)) + "  " + countCell + "\n")
 
-	peersCell := exValueStyle.Render(fmt.Sprintf("%d", len(s.peers)))
+	peersCell := theme.Value.Render(fmt.Sprintf("%d", len(s.peers)))
 	if s.peersErr != nil {
 		if elnode.IsMethodNotFound(s.peersErr) {
-			peersCell = exBadgeWarn.Render(" admin disabled ")
+			peersCell = theme.WarnBadge.Render(" admin disabled ")
 		} else {
-			peersCell = exErrTextStyle.Render("✕ " + s.peersErr.Error())
+			peersCell = theme.ErrText.Render("✕ " + s.peersErr.Error())
 		}
 	}
-	b.WriteString("  " + exLabelStyle.Render(padRight("admin_peers", 16)) + "  " + peersCell + "\n")
+	b.WriteString("  " + theme.Label.Render(padRight("admin_peers", 16)) + "  " + peersCell + "\n")
 	return b.String()
 }
 
@@ -237,7 +213,7 @@ func (s executionPeersScreen) renderBody() (string, int) {
 		return s.renderError(), -1
 	}
 	if len(s.peers) == 0 {
-		return "\n  " + exMuteStyle.Render("(no peers reported)"), -1
+		return "\n  " + theme.Mute.Render("(no peers reported)"), -1
 	}
 	return s.renderRows()
 }
@@ -246,22 +222,22 @@ func (s executionPeersScreen) renderError() string {
 	var b strings.Builder
 	b.WriteString("\n")
 	if elnode.IsMethodNotFound(s.peersErr) {
-		b.WriteString("  " + exErrTitleStyle.Render("admin_peers unavailable") + "\n\n")
-		b.WriteString("  " + exMuteStyle.Render(s.peersErr.Error()) + "\n\n")
-		b.WriteString("  " + exValueStyle.Render(
+		b.WriteString("  " + theme.ErrTitle.Render("admin_peers unavailable") + "\n\n")
+		b.WriteString("  " + theme.Mute.Render(s.peersErr.Error()) + "\n\n")
+		b.WriteString("  " + theme.Value.Render(
 			"This execution node hasn't enabled the admin JSON-RPC namespace,") + "\n")
-		b.WriteString("  " + exValueStyle.Render(
+		b.WriteString("  " + theme.Value.Render(
 			"so per-peer detail can't be retrieved. net_peerCount lives in the") + "\n")
-		b.WriteString("  " + exValueStyle.Render(
+		b.WriteString("  " + theme.Value.Render(
 			"net namespace and still works.") + "\n\n")
-		b.WriteString("  " + exLabelStyle.Render("To enable on op-geth / geth:") + "\n")
-		b.WriteString("  " + exValueStyle.Render("  --http.api eth,net,web3,admin") + "\n")
-		b.WriteString("  " + exValueStyle.Render("  --http.addr 0.0.0.0  --http") + "\n\n")
-		b.WriteString("  " + exLabelStyle.Render("To enable on op-reth:") + "\n")
-		b.WriteString("  " + exValueStyle.Render("  --http  --http.api eth,net,web3,admin") + "\n")
+		b.WriteString("  " + theme.Label.Render("To enable on op-geth / geth:") + "\n")
+		b.WriteString("  " + theme.Value.Render("  --http.api eth,net,web3,admin") + "\n")
+		b.WriteString("  " + theme.Value.Render("  --http.addr 0.0.0.0  --http") + "\n\n")
+		b.WriteString("  " + theme.Label.Render("To enable on op-reth:") + "\n")
+		b.WriteString("  " + theme.Value.Render("  --http  --http.api eth,net,web3,admin") + "\n")
 	} else {
-		b.WriteString("  " + exErrTitleStyle.Render("admin_peers failed") + "\n\n")
-		b.WriteString("  " + exErrTextStyle.Render(s.peersErr.Error()) + "\n")
+		b.WriteString("  " + theme.ErrTitle.Render("admin_peers failed") + "\n\n")
+		b.WriteString("  " + theme.ErrText.Render(s.peersErr.Error()) + "\n")
 	}
 	return b.String()
 }
@@ -281,23 +257,23 @@ func (s executionPeersScreen) renderRows() (string, int) {
 	for i, r := range s.peers {
 		var nameCell string
 		if r.name != "" {
-			nameCell = exNameStyle.Render(padTrunc(r.name, exNameColW))
+			nameCell = theme.Name.Render(padTrunc(r.name, exNameColW))
 		} else {
-			nameCell = exDimNameStyle.Render(padTrunc("·", exNameColW))
+			nameCell = theme.Mute.Render(padTrunc("·", exNameColW))
 		}
 
-		idCell := exValueStyle.Render(padTrunc(shrinkID(r.peer.ID, idW), idW))
+		idCell := theme.Value.Render(padTrunc(shrinkID(r.peer.ID, idW), idW))
 		ver := r.peer.Name
 		if ver == "" {
 			ver = "(no name)"
 		}
-		versionCell := exMuteStyle.Render(padTrunc(ver, exVersionColW))
+		versionCell := theme.Mute.Render(padTrunc(ver, exVersionColW))
 
 		dir := "out"
-		dirStyle := exDirOutStyle
+		dirStyle := theme.DirOut
 		if r.peer.Network.Inbound {
 			dir = "in"
-			dirStyle = exDirInStyle
+			dirStyle = theme.DirIn
 		}
 		dirCell := dirStyle.Render(padTrunc(dir, exDirColW))
 
@@ -305,16 +281,16 @@ func (s executionPeersScreen) renderRows() (string, int) {
 		if addr == "" {
 			addr = "—"
 		}
-		addrCell := exValueStyle.Render(padTrunc(addr, 21))
+		addrCell := theme.Value.Render(padTrunc(addr, 21))
 
 		cursor := "  "
 		if i == s.cursor {
-			cursor = exCursorStyle.Render("▸ ")
+			cursor = theme.Cursor.Render("▸ ")
 			cursorLine = lineNo
 		}
 		row := cursor + nameCell + " " + idCell + " " + versionCell + " " + dirCell + " " + addrCell
 		if i == s.cursor {
-			row = exSelectedBgStyle.Render(row)
+			row = theme.SelectedRow.Render(row)
 		}
 		b.WriteString("  " + row + "\n")
 		lineNo++

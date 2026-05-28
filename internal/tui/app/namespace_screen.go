@@ -14,6 +14,7 @@ import (
 	"op-ctl/internal/namespace"
 	"op-ctl/internal/opnode"
 	"op-ctl/internal/sshtunnel"
+	"op-ctl/internal/tui/theme"
 )
 
 // namespaceScreen drives the live snapshot flow: it fans out one
@@ -60,10 +61,10 @@ const (
 type nsRow struct {
 	backend config.Backend
 
-	consensus       probeState
-	consensusInfo   *opnode.PeerInfo
-	consensusErr    error
-	consensusLatMs  uint64
+	consensus      probeState
+	consensusInfo  *opnode.PeerInfo
+	consensusErr   error
+	consensusLatMs uint64
 
 	execution      probeState
 	executionInfo  *elnode.NodeInfo
@@ -238,31 +239,6 @@ func (s namespaceScreen) allDone() bool {
 	return true
 }
 
-// ---------- styles ----------
-
-var (
-	nsTitleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	nsSubtitleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	nsHelpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
-
-	nsBackendStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14"))
-	nsLabelStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	nsValueStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
-	nsErrTextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-
-	nsOKStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
-	nsFailStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
-	nsPendingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	nsRunStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true)
-
-	nsBadgeBase    = lipgloss.NewStyle().Padding(0, 1).Foreground(lipgloss.Color("0")).Bold(true)
-	nsBadgeOK      = nsBadgeBase.Background(lipgloss.Color("10"))
-	nsBadgePartial = nsBadgeBase.Background(lipgloss.Color("11"))
-	nsBadgeEmpty   = nsBadgeBase.Background(lipgloss.Color("9"))
-)
-
-var spinnerFrames = []rune{'⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'}
-
 func (s namespaceScreen) View() string {
 	if s.allDone() {
 		return s.viewResult()
@@ -274,8 +250,8 @@ func (s namespaceScreen) View() string {
 
 func (s namespaceScreen) viewProgress() string {
 	var b strings.Builder
-	b.WriteString(nsTitleStyle.Render("namespace") + "  " +
-		nsSubtitleStyle.Render(fmt.Sprintf("snapshotting %d backend(s)...", len(s.rows))) + "\n\n")
+	b.WriteString(theme.Title.Render("namespace") + "  " +
+		theme.Subtitle.Render(fmt.Sprintf("snapshotting %d backend(s)...", len(s.rows))) + "\n\n")
 
 	nameW := 0
 	for _, r := range s.rows {
@@ -286,7 +262,7 @@ func (s namespaceScreen) viewProgress() string {
 
 	const probeColW = 12 // ✓/⚠/✕ + " 999ms" comfortably; pads short cells
 	for _, r := range s.rows {
-		name := nsBackendStyle.Render(r.backend.Name) +
+		name := theme.Name.Render(r.backend.Name) +
 			strings.Repeat(" ", nameW-lipgloss.Width(r.backend.Name))
 		consCell := padTrunc(s.probeCell(r.consensus, r.consensusLatMs), probeColW)
 		execCell := padTrunc(s.probeCell(r.execution, r.executionLatMs), probeColW)
@@ -294,27 +270,27 @@ func (s namespaceScreen) viewProgress() string {
 
 		fmt.Fprintf(&b, "  %s   %s %s  %s %s  %s %s\n",
 			name,
-			nsLabelStyle.Render("consensus"), consCell,
-			nsLabelStyle.Render("execution"), execCell,
-			nsLabelStyle.Render("write"), writeCell,
+			theme.Label.Render("consensus"), consCell,
+			theme.Label.Render("execution"), execCell,
+			theme.Label.Render("write"), writeCell,
 		)
 	}
 
 	b.WriteString("\n")
-	b.WriteString(nsHelpStyle.Render("running... q quits and aborts pending writes"))
+	b.WriteString(theme.Help.Render("running... q quits and aborts pending writes"))
 	return b.String()
 }
 
 func (s namespaceScreen) probeCell(p probeState, latencyMS uint64) string {
 	switch p {
 	case probePending:
-		return nsPendingStyle.Render("·")
+		return theme.Label.Render("·")
 	case probeRunning:
-		return nsRunStyle.Render(string(spinnerFrames[s.spinFrame%len(spinnerFrames)]))
+		return theme.WarnText.Bold(true).Render(theme.Spinner(s.spinFrame))
 	case probeOK:
-		return nsOKStyle.Render("✓") + " " + nsLabelStyle.Render(fmt.Sprintf("%dms", latencyMS))
+		return theme.OKText.Bold(true).Render("✓") + " " + theme.Label.Render(fmt.Sprintf("%dms", latencyMS))
 	case probeFailed:
-		return nsFailStyle.Render("✕")
+		return theme.ErrText.Bold(true).Render("✕")
 	}
 	return "?"
 }
@@ -322,13 +298,13 @@ func (s namespaceScreen) probeCell(p probeState, latencyMS uint64) string {
 func (s namespaceScreen) writeCell(r nsRow) string {
 	switch r.write {
 	case writeIdle:
-		return nsPendingStyle.Render("·")
+		return theme.Label.Render("·")
 	case writeRunning:
-		return nsRunStyle.Render(string(spinnerFrames[s.spinFrame%len(spinnerFrames)]))
+		return theme.WarnText.Bold(true).Render(theme.Spinner(s.spinFrame))
 	case writeDone:
-		return nsOKStyle.Render("✓")
+		return theme.OKText.Bold(true).Render("✓")
 	case writeFailed:
-		return nsFailStyle.Render("✕")
+		return theme.ErrText.Bold(true).Render("✕")
 	}
 	return "?"
 }
@@ -349,14 +325,14 @@ func (s namespaceScreen) viewResult() string {
 	}
 
 	var head strings.Builder
-	head.WriteString(nsTitleStyle.Render("namespace") + "  " +
-		nsSubtitleStyle.Render("snapshot complete") + "\n")
+	head.WriteString(theme.Title.Render("namespace") + "  " +
+		theme.Subtitle.Render("snapshot complete") + "\n")
 	head.WriteString("  ")
-	head.WriteString(nsBadgeOK.Render(fmt.Sprintf(" %d ok ", okCount)))
+	head.WriteString(theme.OKBadge.Render(fmt.Sprintf(" %d ok ", okCount)))
 	head.WriteString("  ")
-	head.WriteString(nsBadgePartial.Render(fmt.Sprintf(" %d partial ", partialCount)))
+	head.WriteString(theme.WarnBadge.Render(fmt.Sprintf(" %d partial ", partialCount)))
 	head.WriteString("  ")
-	head.WriteString(nsBadgeEmpty.Render(fmt.Sprintf(" %d empty ", emptyCount)))
+	head.WriteString(theme.ErrBadge.Render(fmt.Sprintf(" %d empty ", emptyCount)))
 	head.WriteString("\n")
 
 	var body strings.Builder
@@ -367,7 +343,7 @@ func (s namespaceScreen) viewResult() string {
 		body.WriteString(s.renderRowDetail(r))
 	}
 
-	footer := nsHelpStyle.Render("j/k ↑/↓ scroll · g/G top/bottom · q back")
+	footer := theme.Footer(theme.KeyScroll, theme.KeyTopBottom, theme.KeyBack)
 
 	if s.width == 0 || s.height == 0 {
 		return head.String() + "\n" + body.String() + "\n\n" + footer
@@ -413,16 +389,16 @@ func (s namespaceScreen) renderRowDetail(r nsRow) string {
 
 	statusBadge, statusText := rowStatus(r)
 	b.WriteString(statusBadge + " ")
-	b.WriteString(nsBackendStyle.Render(r.backend.Name))
+	b.WriteString(theme.Name.Render(r.backend.Name))
 	if statusText != "" {
-		b.WriteString("  " + nsSubtitleStyle.Render(statusText))
+		b.WriteString("  " + theme.Subtitle.Render(statusText))
 	}
 	b.WriteString("\n")
 	if r.write == writeDone && r.writePath != "" {
-		b.WriteString("  " + nsLabelStyle.Render("file") + "  " + nsValueStyle.Render(r.writePath) + "\n")
+		b.WriteString("  " + theme.Label.Render("file") + "  " + theme.Value.Render(r.writePath) + "\n")
 	} else if r.write == writeFailed && r.writeErr != nil {
-		b.WriteString("  " + nsLabelStyle.Render("file") + "  " +
-			nsErrTextStyle.Render("write failed: "+r.writeErr.Error()) + "\n")
+		b.WriteString("  " + theme.Label.Render("file") + "  " +
+			theme.ErrText.Render("write failed: "+r.writeErr.Error()) + "\n")
 	}
 
 	b.WriteString(s.detailBlock("consensus", r.consensus, r.consensusErr,
@@ -449,23 +425,23 @@ func (s namespaceScreen) detailBlock(label string, st probeState, err error, fie
 		if err != nil {
 			msg = "failed: " + err.Error()
 		}
-		return "  " + nsLabelStyle.Render(label) + "  " + nsFailStyle.Render("✕ ") +
-			nsErrTextStyle.Render(msg) + "\n"
+		return "  " + theme.Label.Render(label) + "  " + theme.ErrText.Bold(true).Render("✕ ") +
+			theme.ErrText.Render(msg) + "\n"
 	case probeOK:
 		var b strings.Builder
-		b.WriteString("  " + nsLabelStyle.Render(label) + "\n")
+		b.WriteString("  " + theme.Label.Render(label) + "\n")
 		for _, f := range fields {
 			val := f.val
 			if val == "" {
-				val = nsPendingStyle.Render("(empty)")
+				val = theme.Label.Render("(empty)")
 			} else {
-				val = nsValueStyle.Render(val)
+				val = theme.Value.Render(val)
 			}
-			b.WriteString("    " + nsLabelStyle.Render(padRight(f.key, 8)) + "  " + val + "\n")
+			b.WriteString("    " + theme.Label.Render(padRight(f.key, 8)) + "  " + val + "\n")
 		}
 		return b.String()
 	default:
-		return "  " + nsLabelStyle.Render(label) + "  " + nsPendingStyle.Render("(not run)") + "\n"
+		return "  " + theme.Label.Render(label) + "  " + theme.Label.Render("(not run)") + "\n"
 	}
 }
 
@@ -493,17 +469,17 @@ func padTrunc(s string, n int) string {
 func rowStatus(r nsRow) (badge, text string) {
 	switch {
 	case r.write == writeFailed:
-		return nsFailStyle.Render("✕"), "write failed"
+		return theme.ErrText.Bold(true).Render("✕"), "write failed"
 	case r.consensus == probeOK && r.execution == probeOK:
-		return nsOKStyle.Render("✓"), ""
+		return theme.OKText.Bold(true).Render("✓"), ""
 	case r.consensus == probeOK || r.execution == probeOK:
 		side := "consensus"
 		if r.consensus == probeOK {
 			side = "execution"
 		}
-		return nsRunStyle.Render("⚠"), "partial: " + side + " failed"
+		return theme.WarnText.Bold(true).Render("⚠"), "partial: " + side + " failed"
 	default:
-		return nsFailStyle.Render("✕"), "empty: both probes failed"
+		return theme.ErrText.Bold(true).Render("✕"), "empty: both probes failed"
 	}
 }
 

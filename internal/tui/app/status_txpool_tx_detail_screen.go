@@ -9,10 +9,10 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"op-ctl/internal/config"
 	"op-ctl/internal/elnode"
+	"op-ctl/internal/tui/theme"
 )
 
 // statusTxPoolTxDetailScreen is the Stage-2 drill-down: the full
@@ -70,24 +70,12 @@ func (s statusTxPoolTxDetailScreen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return s, nil
 }
 
-// ---------- styles ----------
-
-var (
-	txfTitleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	txfSubtitleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	txfLabelStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	txfValueStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
-	txfSectionStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("11"))
-	txfMuteStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	txfHelpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
-)
-
 func (s statusTxPoolTxDetailScreen) View() string {
 	if s.width == 0 || s.height == 0 {
 		return strings.Join(s.body, "\n")
 	}
 	header := s.renderHeader()
-	footer := txfHelpStyle.Render("j/k ↑/↓ scroll · g/G top/bottom · q back")
+	footer := theme.Footer(theme.KeyScroll, theme.KeyTopBottom, theme.KeyBack)
 
 	headerLines := strings.Split(header, "\n")
 	avail := s.height - len(headerLines) - 1
@@ -118,11 +106,11 @@ func (s statusTxPoolTxDetailScreen) View() string {
 
 func (s statusTxPoolTxDetailScreen) renderHeader() string {
 	var b strings.Builder
-	b.WriteString(txfTitleStyle.Render("tx detail · "+s.backend.Name) + "  ")
-	b.WriteString(txfSubtitleStyle.Render(s.backend.ExecutionRPCURL))
+	b.WriteString(theme.Title.Render("tx detail · "+s.backend.Name) + "  ")
+	b.WriteString(theme.Subtitle.Render(s.backend.ExecutionRPCURL))
 	if s.tx != nil {
 		b.WriteString("\n  ")
-		b.WriteString(txfSubtitleStyle.Render(fmt.Sprintf("sender %s · nonce %d", s.tx.From, s.tx.Nonce)))
+		b.WriteString(theme.Subtitle.Render(fmt.Sprintf("sender %s · nonce %d", s.tx.From, s.tx.Nonce)))
 	}
 	return b.String()
 }
@@ -135,65 +123,65 @@ func (s statusTxPoolTxDetailScreen) renderBody() string {
 	b.WriteString("\n")
 
 	if s.tx == nil {
-		b.WriteString("  " + txfMuteStyle.Render(
+		b.WriteString("  " + theme.Mute.Render(
 			"tx no longer in pool — it may have been mined between list-fetch and detail-fetch.") + "\n")
-		b.WriteString("  " + txfMuteStyle.Render(
+		b.WriteString("  " + theme.Mute.Render(
 			"press q to return to the list and r to refresh.") + "\n")
 		return b.String()
 	}
 
 	tx := s.tx
-	b.WriteString(field("hash", txfValueStyle.Render(tx.Hash)))
-	b.WriteString(field("from", txfValueStyle.Render(tx.From)))
-	b.WriteString(field("to", txfValueStyle.Render(tx.To)))
-	b.WriteString(field("nonce", txfValueStyle.Render(fmt.Sprintf("%d", tx.Nonce))))
-	b.WriteString(field("gas", txfValueStyle.Render(fmt.Sprintf("%d", tx.Gas))))
-	b.WriteString(field("value", txfValueStyle.Render(formatValueDecimal(tx.Value))))
+	b.WriteString(field("hash", theme.Value.Render(tx.Hash)))
+	b.WriteString(field("from", theme.Value.Render(tx.From)))
+	b.WriteString(field("to", theme.Value.Render(tx.To)))
+	b.WriteString(field("nonce", theme.Value.Render(fmt.Sprintf("%d", tx.Nonce))))
+	b.WriteString(field("gas", theme.Value.Render(fmt.Sprintf("%d", tx.Gas))))
+	b.WriteString(field("value", theme.Value.Render(formatValueDecimal(tx.Value))))
 
 	b.WriteString("\n")
-	b.WriteString(field("type", txfValueStyle.Render(fmt.Sprintf("%d", tx.Type))))
-	b.WriteString(field("chainId", txfValueStyle.Render(fmt.Sprintf("%d", tx.ChainID))))
-	b.WriteString(field("gasPrice", txfValueStyle.Render(formatBigOrEmpty(tx.GasPrice)+" wei")))
-	b.WriteString(field("maxFeePerGas", txfValueStyle.Render(formatBigOrEmpty(tx.MaxFee)+" wei")))
-	b.WriteString(field("maxPriorityFeePerGas", txfValueStyle.Render(formatBigOrEmpty(tx.MaxTip)+" wei")))
+	b.WriteString(field("type", theme.Value.Render(fmt.Sprintf("%d", tx.Type))))
+	b.WriteString(field("chainId", theme.Value.Render(fmt.Sprintf("%d", tx.ChainID))))
+	b.WriteString(field("gasPrice", theme.Value.Render(formatBigOrEmpty(tx.GasPrice)+" wei")))
+	b.WriteString(field("maxFeePerGas", theme.Value.Render(formatBigOrEmpty(tx.MaxFee)+" wei")))
+	b.WriteString(field("maxPriorityFeePerGas", theme.Value.Render(formatBigOrEmpty(tx.MaxTip)+" wei")))
 
 	b.WriteString("\n")
-	b.WriteString(txfSectionStyle.Render(fmt.Sprintf("input (%d bytes)", len(tx.Input))) + "\n")
+	b.WriteString(theme.Section.Render(fmt.Sprintf("input (%d bytes)", len(tx.Input))) + "\n")
 	if len(tx.Input) == 0 {
-		b.WriteString("  " + txfMuteStyle.Render("(empty)") + "\n")
+		b.WriteString("  " + theme.Mute.Render("(empty)") + "\n")
 	} else {
 		h := "0x" + hex.EncodeToString(tx.Input)
 		if len(h) > 64 {
-			b.WriteString("  " + txfValueStyle.Render(h[:64]) + "\n")
-			b.WriteString("  " + txfMuteStyle.Render(
+			b.WriteString("  " + theme.Value.Render(h[:64]) + "\n")
+			b.WriteString("  " + theme.Mute.Render(
 				fmt.Sprintf("... (%d more bytes)", len(tx.Input)-32)) + "\n")
 		} else {
-			b.WriteString("  " + txfValueStyle.Render(h) + "\n")
+			b.WriteString("  " + theme.Value.Render(h) + "\n")
 		}
 	}
 
 	b.WriteString("\n")
-	b.WriteString(txfSectionStyle.Render("signature") + "\n")
-	b.WriteString(field("r", txfValueStyle.Render(txfOrEmpty(tx.R))))
-	b.WriteString(field("s", txfValueStyle.Render(txfOrEmpty(tx.S))))
-	b.WriteString(field("v", txfValueStyle.Render(txfOrEmpty(tx.V))))
-	b.WriteString(field("yParity", txfValueStyle.Render(txfOrEmpty(tx.YParity))))
+	b.WriteString(theme.Section.Render("signature") + "\n")
+	b.WriteString(field("r", theme.Value.Render(txfOrEmpty(tx.R))))
+	b.WriteString(field("s", theme.Value.Render(txfOrEmpty(tx.S))))
+	b.WriteString(field("v", theme.Value.Render(txfOrEmpty(tx.V))))
+	b.WriteString(field("yParity", theme.Value.Render(txfOrEmpty(tx.YParity))))
 
 	if len(tx.AccessList) > 0 && string(tx.AccessList) != "null" && string(tx.AccessList) != "[]" {
 		b.WriteString("\n")
-		b.WriteString(txfSectionStyle.Render("accessList") + "\n")
+		b.WriteString(theme.Section.Render("accessList") + "\n")
 		var pretty bytes.Buffer
 		if err := json.Indent(&pretty, tx.AccessList, "  ", "  "); err == nil {
 			for _, line := range strings.Split(pretty.String(), "\n") {
-				b.WriteString("  " + txfValueStyle.Render(line) + "\n")
+				b.WriteString("  " + theme.Value.Render(line) + "\n")
 			}
 		} else {
-			b.WriteString("  " + txfMuteStyle.Render("(unparseable: "+err.Error()+")") + "\n")
+			b.WriteString("  " + theme.Mute.Render("(unparseable: "+err.Error()+")") + "\n")
 		}
 	}
 
 	b.WriteString("\n")
-	b.WriteString(txfSectionStyle.Render("in-pool flags") + "\n")
+	b.WriteString(theme.Section.Render("in-pool flags") + "\n")
 	b.WriteString(field("blockHash", maybeStr(tx.BlockHash)))
 	b.WriteString(field("blockNumber", maybeStr(tx.BlockNumber)))
 	b.WriteString(field("transactionIndex", maybeStr(tx.TxIndex)))
@@ -240,7 +228,7 @@ func txfOrEmpty(s string) string {
 
 func maybeStr(p *string) string {
 	if p == nil {
-		return txfMuteStyle.Render("(null — in pool)")
+		return theme.Mute.Render("(null — in pool)")
 	}
-	return txfValueStyle.Render(*p)
+	return theme.Value.Render(*p)
 }

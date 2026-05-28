@@ -14,6 +14,7 @@ import (
 	"op-ctl/internal/config"
 	"op-ctl/internal/elnode"
 	"op-ctl/internal/sshtunnel"
+	"op-ctl/internal/tui/theme"
 )
 
 // statusTxPoolDetailScreen is the per-backend drill-down: a sortable
@@ -198,22 +199,6 @@ func statusTxPoolDetailTick(interval time.Duration, nextGen uint64) tea.Cmd {
 	return tea.Tick(interval, func(time.Time) tea.Msg { return txpoolListTickMsg{gen: nextGen} })
 }
 
-// ---------- styles ----------
-
-var (
-	txdTitleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	txdSubtitleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	txdLabelStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	txdValueStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
-	txdMuteStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	txdHelpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
-	txdErrStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-	txdCursorStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	txdSelectedBg    = lipgloss.NewStyle().Background(lipgloss.Color("237"))
-	txdPendingFlag   = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
-	txdQueuedFlag    = lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true)
-)
-
 // Minimum column widths. Actual widths are computed per render so that
 // long values (e.g. full wei integers) don't push later columns out of
 // alignment — padTrunc only pads, it doesn't truncate.
@@ -229,8 +214,8 @@ const (
 func (s statusTxPoolDetailScreen) View() string {
 	var b strings.Builder
 
-	b.WriteString(txdTitleStyle.Render("txpool detail · "+s.backend.Name) + "  ")
-	b.WriteString(txdSubtitleStyle.Render(s.backend.ExecutionRPCURL))
+	b.WriteString(theme.Title.Render("txpool detail · "+s.backend.Name) + "  ")
+	b.WriteString(theme.Subtitle.Render(s.backend.ExecutionRPCURL))
 	b.WriteString("\n")
 
 	// Status line: last refreshed + cadence + entry count.
@@ -248,21 +233,21 @@ func (s statusTxPoolDetailScreen) View() string {
 		ageDesc = "last refreshed " + humanAge(time.Since(s.observedAt)) + " ago"
 	}
 	b.WriteString("  ")
-	b.WriteString(txdLabelStyle.Render(fmt.Sprintf(
+	b.WriteString(theme.Label.Render(fmt.Sprintf(
 		"%s · %s · %d txs", ageDesc, refreshDesc, len(s.txs),
 	)))
 	b.WriteString("\n")
 
 	if s.err != nil {
 		b.WriteString("  ")
-		b.WriteString(txdErrStyle.Render("ERR " + truncate(s.err.Error(), 80)))
+		b.WriteString(theme.ErrText.Render("ERR " + truncate(s.err.Error(), 80)))
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
 
 	if s.pending {
 		b.WriteString("  ")
-		b.WriteString(txdMuteStyle.Render("polling…"))
+		b.WriteString(theme.Mute.Render("polling…"))
 		b.WriteString("\n")
 		b.WriteString("\n")
 		b.WriteString(s.footer())
@@ -270,7 +255,7 @@ func (s statusTxPoolDetailScreen) View() string {
 	}
 	if len(s.txs) == 0 {
 		b.WriteString("  ")
-		b.WriteString(txdMuteStyle.Render("(empty pool)"))
+		b.WriteString(theme.Mute.Render("(empty pool)"))
 		b.WriteString("\n")
 		b.WriteString("\n")
 		b.WriteString(s.footer())
@@ -309,42 +294,42 @@ func (s statusTxPoolDetailScreen) View() string {
 
 	// Header.
 	b.WriteString("    ")
-	b.WriteString(padTrunc(txdLabelStyle.Render("from"), fromW))
+	b.WriteString(padTrunc(theme.Label.Render("from"), fromW))
 	b.WriteString("  ")
-	b.WriteString(padTrunc(txdLabelStyle.Render("nonce"), nonceW))
+	b.WriteString(padTrunc(theme.Label.Render("nonce"), nonceW))
 	b.WriteString("  ")
-	b.WriteString(padTrunc(txdLabelStyle.Render("to"), toW))
+	b.WriteString(padTrunc(theme.Label.Render("to"), toW))
 	b.WriteString("  ")
-	b.WriteString(padTrunc(txdLabelStyle.Render("value"), valueW))
+	b.WriteString(padTrunc(theme.Label.Render("value"), valueW))
 	b.WriteString("  ")
-	b.WriteString(padTrunc(txdLabelStyle.Render("gas"), gasW))
+	b.WriteString(padTrunc(theme.Label.Render("gas"), gasW))
 	b.WriteString("  ")
-	b.WriteString(txdLabelStyle.Render("p/q"))
+	b.WriteString(theme.Label.Render("p/q"))
 	b.WriteString("\n")
 
 	for i, tx := range s.txs {
 		var row strings.Builder
-		row.WriteString(padTrunc(txdValueStyle.Render(cells[i].from), fromW))
+		row.WriteString(padTrunc(theme.Value.Render(cells[i].from), fromW))
 		row.WriteString("  ")
-		row.WriteString(padTrunc(txdValueStyle.Render(cells[i].nonce), nonceW))
+		row.WriteString(padTrunc(theme.Value.Render(cells[i].nonce), nonceW))
 		row.WriteString("  ")
-		row.WriteString(padTrunc(txdValueStyle.Render(cells[i].to), toW))
+		row.WriteString(padTrunc(theme.Value.Render(cells[i].to), toW))
 		row.WriteString("  ")
-		row.WriteString(padTrunc(txdValueStyle.Render(cells[i].value), valueW))
+		row.WriteString(padTrunc(theme.Value.Render(cells[i].value), valueW))
 		row.WriteString("  ")
-		row.WriteString(padTrunc(txdValueStyle.Render(cells[i].gas), gasW))
+		row.WriteString(padTrunc(theme.Value.Render(cells[i].gas), gasW))
 		row.WriteString("  ")
 		if tx.Pending {
-			row.WriteString(txdPendingFlag.Render("P"))
+			row.WriteString(theme.OKText.Bold(true).Render("P"))
 		} else {
-			row.WriteString(txdQueuedFlag.Render("Q"))
+			row.WriteString(theme.WarnText.Bold(true).Render("Q"))
 		}
 
 		cursor := "  "
 		rowText := row.String()
 		if i == s.cursor {
-			cursor = txdCursorStyle.Render("▸ ")
-			rowText = txdSelectedBg.Render(rowText)
+			cursor = theme.Cursor.Render("▸ ")
+			rowText = theme.SelectedRow.Render(rowText)
 		}
 		b.WriteString("  ")
 		b.WriteString(cursor)
@@ -358,7 +343,7 @@ func (s statusTxPoolDetailScreen) View() string {
 }
 
 func (s statusTxPoolDetailScreen) footer() string {
-	return txdHelpStyle.Render("↑/↓ j/k navigate · enter detail · r refresh · q back")
+	return theme.Footer(theme.KeyNav, theme.KeyOpenDetail, theme.KeyRefresh, theme.KeyBack)
 }
 
 // humanAge renders a duration as a compact age string. Granularity:

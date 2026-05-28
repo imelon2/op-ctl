@@ -8,10 +8,10 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"op-ctl/internal/config"
 	"op-ctl/internal/opnode"
+	"op-ctl/internal/tui/theme"
 )
 
 // peerDetailScreen renders one PeerEntry from opp2p_peers in full —
@@ -75,28 +75,12 @@ func (s peerDetailScreen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return s, nil
 }
 
-var (
-	pdTitleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	pdSubtitleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	pdLabelStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	pdValueStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
-	pdNameStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14"))
-	pdSectionStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("11"))
-	pdHelpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
-	pdMuteStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-
-	pdBadgeBase = lipgloss.NewStyle().Padding(0, 1).Bold(true).Foreground(lipgloss.Color("0"))
-	pdBadgeOK   = pdBadgeBase.Background(lipgloss.Color("10"))
-	pdBadgeWarn = pdBadgeBase.Background(lipgloss.Color("11"))
-	pdBadgeErr  = pdBadgeBase.Background(lipgloss.Color("9"))
-)
-
 func (s peerDetailScreen) View() string {
 	if s.width == 0 || s.height == 0 {
 		return strings.Join(s.body, "\n")
 	}
 	header := s.renderHeader()
-	footer := pdHelpStyle.Render("j/k ↑/↓ scroll · g/G top/bottom · q back")
+	footer := theme.Footer(theme.KeyScroll, theme.KeyTopBottom, theme.KeyBack)
 
 	headerLines := strings.Split(header, "\n")
 	avail := s.height - len(headerLines) - 1
@@ -126,17 +110,17 @@ func (s peerDetailScreen) View() string {
 }
 
 func (s peerDetailScreen) renderHeader() string {
-	title := pdTitleStyle.Render("peer detail")
+	title := theme.Title.Render("peer detail")
 	var stateBadge string
 	switch {
 	case s.banned:
-		stateBadge = pdBadgeErr.Render(" banned ")
+		stateBadge = theme.ErrBadge.Render(" banned ")
 	case s.entry != nil && s.entry.Connectedness == 1:
-		stateBadge = pdBadgeOK.Render(" connected ")
+		stateBadge = theme.OKBadge.Render(" connected ")
 	case s.entry != nil:
-		stateBadge = pdBadgeWarn.Render(" " + connectednessLabelDetail(s.entry.Connectedness) + " ")
+		stateBadge = theme.WarnBadge.Render(" " + connectednessLabelDetail(s.entry.Connectedness) + " ")
 	}
-	src := pdSubtitleStyle.Render("from " + s.backend.Name + " · " + s.backend.ConsensusRPCURL)
+	src := theme.Subtitle.Render("from " + s.backend.Name + " · " + s.backend.ConsensusRPCURL)
 	return title + "  " + stateBadge + "\n" + src
 }
 
@@ -149,63 +133,63 @@ func (s peerDetailScreen) renderBody() string {
 
 	b.WriteString("\n")
 	if s.name != "" {
-		b.WriteString(field("namespace name", pdNameStyle.Render(s.name)))
+		b.WriteString(field("namespace name", theme.Name.Render(s.name)))
 	} else {
-		b.WriteString(field("namespace name", pdMuteStyle.Render("(unknown)")))
+		b.WriteString(field("namespace name", theme.Mute.Render("(unknown)")))
 	}
 	if s.entry == nil {
-		b.WriteString(field("peerID", pdValueStyle.Render(s.peerID)))
+		b.WriteString(field("peerID", theme.Value.Render(s.peerID)))
 		b.WriteString("\n")
-		b.WriteString(pdMuteStyle.Render("  banned peer — opp2p_peers reports only the ID,") + "\n")
-		b.WriteString(pdMuteStyle.Render("  no further attributes available.") + "\n")
+		b.WriteString(theme.Mute.Render("  banned peer — opp2p_peers reports only the ID,") + "\n")
+		b.WriteString(theme.Mute.Render("  no further attributes available.") + "\n")
 		return b.String()
 	}
 
 	e := s.entry
-	b.WriteString(field("peerID", pdValueStyle.Render(e.PeerID)))
-	b.WriteString(field("nodeID", pdValueStyle.Render(e.NodeID)))
+	b.WriteString(field("peerID", theme.Value.Render(e.PeerID)))
+	b.WriteString(field("nodeID", theme.Value.Render(e.NodeID)))
 	b.WriteString(field("userAgent", orMute(e.UserAgent)))
 	b.WriteString(field("protocolVersion", orMute(e.ProtocolVersion)))
 	b.WriteString(field("ENR", orMute(e.ENR)))
 
 	b.WriteString("\n")
-	b.WriteString(field("connectedness", pdValueStyle.Render(connectednessLabelDetail(e.Connectedness))))
-	b.WriteString(field("direction", pdValueStyle.Render(directionLabelDetail(e.Direction))))
-	b.WriteString(field("protected", pdValueStyle.Render(fmt.Sprintf("%t", e.Protected))))
-	b.WriteString(field("chainID", pdValueStyle.Render(fmt.Sprintf("%d", e.ChainID))))
-	b.WriteString(field("latency", pdValueStyle.Render(formatLatency(e.Latency))))
-	b.WriteString(field("gossipBlocks", pdValueStyle.Render(fmt.Sprintf("%t", e.GossipBlocks))))
+	b.WriteString(field("connectedness", theme.Value.Render(connectednessLabelDetail(e.Connectedness))))
+	b.WriteString(field("direction", theme.Value.Render(directionLabelDetail(e.Direction))))
+	b.WriteString(field("protected", theme.Value.Render(fmt.Sprintf("%t", e.Protected))))
+	b.WriteString(field("chainID", theme.Value.Render(fmt.Sprintf("%d", e.ChainID))))
+	b.WriteString(field("latency", theme.Value.Render(formatLatency(e.Latency))))
+	b.WriteString(field("gossipBlocks", theme.Value.Render(fmt.Sprintf("%t", e.GossipBlocks))))
 
 	b.WriteString("\n")
-	b.WriteString(pdSectionStyle.Render(fmt.Sprintf("addresses (%d)", len(e.Addresses))) + "\n")
+	b.WriteString(theme.Section.Render(fmt.Sprintf("addresses (%d)", len(e.Addresses))) + "\n")
 	if len(e.Addresses) == 0 {
-		b.WriteString("  " + pdMuteStyle.Render("(none)") + "\n")
+		b.WriteString("  " + theme.Mute.Render("(none)") + "\n")
 	} else {
 		for _, a := range e.Addresses {
-			b.WriteString("  " + pdValueStyle.Render(a) + "\n")
+			b.WriteString("  " + theme.Value.Render(a) + "\n")
 		}
 	}
 
 	b.WriteString("\n")
-	b.WriteString(pdSectionStyle.Render(fmt.Sprintf("protocols (%d)", len(e.Protocols))) + "\n")
+	b.WriteString(theme.Section.Render(fmt.Sprintf("protocols (%d)", len(e.Protocols))) + "\n")
 	if len(e.Protocols) == 0 {
-		b.WriteString("  " + pdMuteStyle.Render("(none)") + "\n")
+		b.WriteString("  " + theme.Mute.Render("(none)") + "\n")
 	} else {
 		for _, p := range e.Protocols {
-			b.WriteString("  " + pdValueStyle.Render(p) + "\n")
+			b.WriteString("  " + theme.Value.Render(p) + "\n")
 		}
 	}
 
 	if len(e.Scores) > 0 && string(e.Scores) != "null" {
 		b.WriteString("\n")
-		b.WriteString(pdSectionStyle.Render("scores") + "\n")
+		b.WriteString(theme.Section.Render("scores") + "\n")
 		var pretty bytes.Buffer
 		if err := json.Indent(&pretty, e.Scores, "  ", "  "); err == nil {
 			for _, line := range strings.Split(pretty.String(), "\n") {
-				b.WriteString("  " + pdValueStyle.Render(line) + "\n")
+				b.WriteString("  " + theme.Value.Render(line) + "\n")
 			}
 		} else {
-			b.WriteString("  " + pdMuteStyle.Render("(unparseable: "+err.Error()+")") + "\n")
+			b.WriteString("  " + theme.Mute.Render("(unparseable: "+err.Error()+")") + "\n")
 		}
 	}
 
@@ -213,14 +197,14 @@ func (s peerDetailScreen) renderBody() string {
 }
 
 func field(key, val string) string {
-	return "  " + pdLabelStyle.Render(padRight(key, 16)) + "  " + val + "\n"
+	return "  " + theme.Label.Render(padRight(key, 16)) + "  " + val + "\n"
 }
 
 func orMute(s string) string {
 	if s == "" {
-		return pdMuteStyle.Render("(empty)")
+		return theme.Mute.Render("(empty)")
 	}
-	return pdValueStyle.Render(s)
+	return theme.Value.Render(s)
 }
 
 func formatLatency(ns uint64) string {

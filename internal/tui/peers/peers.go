@@ -18,6 +18,7 @@ import (
 	"op-ctl/internal/config"
 	"op-ctl/internal/namespace"
 	"op-ctl/internal/opnode"
+	"op-ctl/internal/tui/theme"
 )
 
 // DoneMsg is emitted when the operator dismisses the peers view (q /
@@ -199,35 +200,6 @@ func halfPage(h int) int {
 	return h / 2
 }
 
-var (
-	border    = lipgloss.RoundedBorder()
-	headerBox = lipgloss.NewStyle().
-			Border(border).
-			BorderForeground(lipgloss.Color("240")).
-			Padding(0, 1)
-
-	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	urlStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	badgeBase  = lipgloss.NewStyle().Padding(0, 1).Foreground(lipgloss.Color("0")).Bold(true)
-	okBadge    = badgeBase.Background(lipgloss.Color("10"))
-	warnBadge  = badgeBase.Background(lipgloss.Color("11"))
-	errBadge   = badgeBase.Background(lipgloss.Color("9"))
-
-	sectionConnectedStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("10"))
-	sectionOtherStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("11"))
-	sectionBannedStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9"))
-
-	nameStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14"))
-	dimNameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	peerIDStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
-	stateStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	muteStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	helpStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
-
-	cursorStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	selectedRowBg  = lipgloss.NewStyle().Background(lipgloss.Color("237"))
-)
-
 const (
 	nameColW    = 14
 	stateColW   = 14
@@ -242,7 +214,7 @@ func (m Model) View() string {
 
 	head := m.renderHeader()
 	body, cursorLine := m.renderBody()
-	footer := helpStyle.Render("↑/↓ j/k navigate · enter detail · q quit")
+	footer := theme.Footer(theme.KeyNav, theme.KeyOpenDetail, theme.KeyQuit)
 
 	avail := m.height - lipgloss.Height(head) - 1
 	if avail < 1 {
@@ -285,19 +257,19 @@ func (m Model) View() string {
 }
 
 func (m Model) renderHeader() string {
-	title := titleStyle.Render(m.backend.Name) + "  " + urlStyle.Render(m.backend.ConsensusRPCURL)
+	title := theme.Title.Render(m.backend.Name) + "  " + theme.Subtitle.Render(m.backend.ConsensusRPCURL)
 	badges := lipgloss.JoinHorizontal(lipgloss.Top,
-		okBadge.Render(fmt.Sprintf(" connected %d ", m.dump.TotalConnected)),
+		theme.OKBadge.Render(fmt.Sprintf(" connected %d ", m.dump.TotalConnected)),
 		"  ",
-		warnBadge.Render(fmt.Sprintf(" known %d ", len(m.dump.Peers))),
+		theme.WarnBadge.Render(fmt.Sprintf(" known %d ", len(m.dump.Peers))),
 		"  ",
-		errBadge.Render(fmt.Sprintf(" banned %d ", len(m.dump.BannedPeers))),
+		theme.ErrBadge.Render(fmt.Sprintf(" banned %d ", len(m.dump.BannedPeers))),
 	)
 	innerW := m.width - 4
 	if innerW < 20 {
 		innerW = 20
 	}
-	return headerBox.Width(innerW).Render(title + "\n" + badges)
+	return theme.HeaderBox.Width(innerW).Render(title + "\n" + badges)
 }
 
 // renderBody renders the three sections and returns (body, cursorLine)
@@ -317,11 +289,11 @@ func (m Model) renderBody() (string, int) {
 
 	writeSection := func(style lipgloss.Style, icon, title string, rows []peerRow, kind sectionKind) {
 		head := style.Render(icon+" "+title) +
-			muteStyle.Render(fmt.Sprintf("  (%d)", len(rows)))
+			theme.Mute.Render(fmt.Sprintf("  (%d)", len(rows)))
 		b.WriteString(head + "\n")
 		lineNo++
 		if len(rows) == 0 {
-			b.WriteString(muteStyle.Render("    (none)") + "\n")
+			b.WriteString(theme.Mute.Render("    (none)") + "\n")
 			lineNo++
 			return
 		}
@@ -336,13 +308,13 @@ func (m Model) renderBody() (string, int) {
 		}
 	}
 
-	writeSection(sectionConnectedStyle, "●", "Connected", m.connected, secConnected)
+	writeSection(theme.OKText.Bold(true), "●", "Connected", m.connected, secConnected)
 	b.WriteString("\n")
 	lineNo++
-	writeSection(sectionOtherStyle, "◐", "Other", m.other, secOther)
+	writeSection(theme.WarnText.Bold(true), "◐", "Other", m.other, secOther)
 	b.WriteString("\n")
 	lineNo++
-	writeSection(sectionBannedStyle, "✕", "Banned", m.banned, secBanned)
+	writeSection(theme.ErrText.Bold(true), "✕", "Banned", m.banned, secBanned)
 
 	return strings.TrimRight(b.String(), "\n"), cursorLine
 }
@@ -350,19 +322,19 @@ func (m Model) renderBody() (string, int) {
 func (m Model) renderRow(r peerRow, kind sectionKind, peerIDW int, selected bool) string {
 	var name string
 	if r.name != "" {
-		name = nameStyle.Render(padTrunc(r.name, nameColW))
+		name = theme.Name.Render(padTrunc(r.name, nameColW))
 	} else {
-		name = dimNameStyle.Render(padTrunc("·", nameColW))
+		name = theme.Mute.Render(padTrunc("·", nameColW))
 	}
-	pid := peerIDStyle.Render(padTrunc(shrinkPeerID(r.peerID, peerIDW), peerIDW))
+	pid := theme.Value.Render(padTrunc(shrinkPeerID(r.peerID, peerIDW), peerIDW))
 
 	var stateCell, latencyCell string
 	switch kind {
 	case secConnected:
-		stateCell = stateStyle.Render(padTrunc(directionLong(r.direction), stateColW))
-		latencyCell = stateStyle.Render(padLeft(fmt.Sprintf("%dms", r.latencyMS), latencyColW))
+		stateCell = theme.Label.Render(padTrunc(directionLong(r.direction), stateColW))
+		latencyCell = theme.Label.Render(padLeft(fmt.Sprintf("%dms", r.latencyMS), latencyColW))
 	case secOther:
-		stateCell = stateStyle.Render(padTrunc(connectednessLabel(r.connectedness), stateColW))
+		stateCell = theme.Label.Render(padTrunc(connectednessLabel(r.connectedness), stateColW))
 		latencyCell = strings.Repeat(" ", latencyColW)
 	case secBanned:
 		stateCell = strings.Repeat(" ", stateColW)
@@ -371,11 +343,11 @@ func (m Model) renderRow(r peerRow, kind sectionKind, peerIDW int, selected bool
 
 	cursor := "  "
 	if selected {
-		cursor = cursorStyle.Render("▸ ")
+		cursor = theme.Cursor.Render("▸ ")
 	}
 	row := cursor + name + " " + pid + " " + stateCell + " " + latencyCell
 	if selected {
-		row = selectedRowBg.Render(row)
+		row = theme.SelectedRow.Render(row)
 	}
 	return "  " + row
 }

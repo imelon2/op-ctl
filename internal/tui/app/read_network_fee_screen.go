@@ -8,10 +8,10 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"op-ctl/internal/l1"
 	"op-ctl/internal/l2"
+	"op-ctl/internal/tui/theme"
 )
 
 // vaultRefreshInterval is the auto-tick cadence for the FeeVault
@@ -327,27 +327,14 @@ func (s readNetworkFeeScreen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return s, nil
 }
 
-// --- view styles ---
-
-var (
-	rnfTitleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	rnfMutedStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	rnfHeaderStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("10"))
-	rnfErrStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-	rnfHelpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
-	rnfLabelStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	rnfValueStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
-	rnfColHeaderStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-)
-
 func (s readNetworkFeeScreen) View() string {
 	var b strings.Builder
 
-	b.WriteString(rnfTitleStyle.Render("read / network-fee"))
+	b.WriteString(theme.Title.Render("read / network-fee"))
 	b.WriteString("\n")
-	b.WriteString(rnfMutedStyle.Render("L1: " + s.l1RPCURL))
+	b.WriteString(theme.Subtitle.Render("L1: " + s.l1RPCURL))
 	b.WriteString("\n")
-	b.WriteString(rnfMutedStyle.Render("L2: " + s.l2RPCURL))
+	b.WriteString(theme.Subtitle.Render("L2: " + s.l2RPCURL))
 	b.WriteString("\n\n")
 
 	// FeeVaults first — operationally interesting + auto-refreshing.
@@ -370,25 +357,25 @@ func (s readNetworkFeeScreen) View() string {
 	b.WriteString(s.renderSysCfgSection())
 	b.WriteString("\n")
 
-	b.WriteString(rnfHelpStyle.Render(fmt.Sprintf("auto-refresh %s · r refresh · q back", vaultRefreshInterval)))
+	b.WriteString(theme.Help.Render(fmt.Sprintf("auto-refresh %s · r refresh · q back", vaultRefreshInterval)))
 	return b.String()
 }
 
 func (s readNetworkFeeScreen) renderVaultsSection() string {
 	var b strings.Builder
-	b.WriteString(rnfHeaderStyle.Render("FeeVaults"))
+	b.WriteString(theme.Header.Render("FeeVaults"))
 	if s.vaults != nil {
-		b.WriteString(rnfMutedStyle.Render(fmt.Sprintf("    latency: %dms  (tick #%d)", s.vaultsLat.Milliseconds(), s.vaultGen)))
+		b.WriteString(theme.Subtitle.Render(fmt.Sprintf("    latency: %dms  (tick #%d)", s.vaultsLat.Milliseconds(), s.vaultGen)))
 	}
 	b.WriteString("\n")
 
 	if s.vaultsLoading && len(s.vaults) == 0 {
-		b.WriteString(rnfMutedStyle.Render("  loading ..."))
+		b.WriteString(theme.Subtitle.Render("  loading ..."))
 		b.WriteString("\n")
 		return b.String()
 	}
 	if s.vaultsErr != nil {
-		b.WriteString(rnfErrStyle.Render(fmt.Sprintf("  ERR %v", s.vaultsErr)))
+		b.WriteString(theme.ErrText.Render(fmt.Sprintf("  ERR %v", s.vaultsErr)))
 		b.WriteString("\n")
 	}
 	b.WriteString(s.renderVaultsTable())
@@ -403,8 +390,8 @@ func (s readNetworkFeeScreen) renderVaultsSection() string {
 // digits); larger values overflow into the next column rather than
 // being truncated — preferable to silently dropping precision.
 const (
-	rnfVaultNameWidth     = 20
-	rnfVaultBalanceWidth  = 16
+	rnfVaultNameWidth      = 20
+	rnfVaultBalanceWidth   = 16
 	rnfVaultTotalProcWidth = 16
 )
 
@@ -416,26 +403,26 @@ func (s readNetworkFeeScreen) renderVaultsTable() string {
 	var b strings.Builder
 	// Header row: empty vault-name slot + 3 column titles.
 	b.WriteString("  ")
-	b.WriteString(rnfColHeaderStyle.Render(rnfPadRight("", rnfVaultNameWidth)))
+	b.WriteString(theme.ColHeader.Render(rnfPadRight("", rnfVaultNameWidth)))
 	b.WriteString("  ")
-	b.WriteString(rnfColHeaderStyle.Render(rnfPadRight("balance", rnfVaultBalanceWidth)))
+	b.WriteString(theme.ColHeader.Render(rnfPadRight("balance", rnfVaultBalanceWidth)))
 	b.WriteString("  ")
-	b.WriteString(rnfColHeaderStyle.Render(rnfPadRight("totalProcessed", rnfVaultTotalProcWidth)))
+	b.WriteString(theme.ColHeader.Render(rnfPadRight("totalProcessed", rnfVaultTotalProcWidth)))
 	b.WriteString("  ")
-	b.WriteString(rnfColHeaderStyle.Render("address"))
+	b.WriteString(theme.ColHeader.Render("address"))
 	b.WriteString("\n")
 
 	for _, v := range s.vaults {
 		bal := bigStrOrErrStr(v.Balance, v.Errors["balance"])
 		tp := bigStrOrErrStr(v.TotalProcessed, v.Errors["totalProcessed"])
 		b.WriteString("  ")
-		b.WriteString(rnfLabelStyle.Render(rnfPadRight(v.Name, rnfVaultNameWidth)))
+		b.WriteString(theme.Label.Render(rnfPadRight(v.Name, rnfVaultNameWidth)))
 		b.WriteString("  ")
-		b.WriteString(rnfValueStyle.Render(rnfPadRight(bal, rnfVaultBalanceWidth)))
+		b.WriteString(theme.Value.Render(rnfPadRight(bal, rnfVaultBalanceWidth)))
 		b.WriteString("  ")
-		b.WriteString(rnfValueStyle.Render(rnfPadRight(tp, rnfVaultTotalProcWidth)))
+		b.WriteString(theme.Value.Render(rnfPadRight(tp, rnfVaultTotalProcWidth)))
 		b.WriteString("  ")
-		b.WriteString(rnfMutedStyle.Render(v.Address))
+		b.WriteString(theme.Subtitle.Render(v.Address))
 		b.WriteString("\n")
 	}
 	return b.String()
@@ -457,20 +444,20 @@ func rnfPadRight(s string, width int) string {
 // lands and then updates in place every second.
 func (s readNetworkFeeScreen) renderGasSection() string {
 	var b strings.Builder
-	b.WriteString(rnfHeaderStyle.Render("GasPrice"))
+	b.WriteString(theme.Header.Render("GasPrice"))
 	if s.gas != nil {
-		b.WriteString(rnfMutedStyle.Render(fmt.Sprintf("    latency: %dms  (tick #%d)", s.gas.Latency.Milliseconds(), s.vaultGen)))
+		b.WriteString(theme.Subtitle.Render(fmt.Sprintf("    latency: %dms  (tick #%d)", s.gas.Latency.Milliseconds(), s.vaultGen)))
 	}
 	b.WriteString("\n")
 
 	if s.gasLoading && s.gas == nil {
-		b.WriteString(rnfMutedStyle.Render("  loading ..."))
+		b.WriteString(theme.Subtitle.Render("  loading ..."))
 		b.WriteString("\n")
 		return b.String()
 	}
 	snap := s.gas
 	if snap == nil {
-		b.WriteString(rnfErrStyle.Render("  ERR no data"))
+		b.WriteString(theme.ErrText.Render("  ERR no data"))
 		b.WriteString("\n")
 		return b.String()
 	}
@@ -492,20 +479,20 @@ func (s readNetworkFeeScreen) renderGasSection() string {
 // as SystemConfig so the two sections read uniformly.
 func (s readNetworkFeeScreen) renderGPOSection() string {
 	var b strings.Builder
-	b.WriteString(rnfHeaderStyle.Render("GasPriceOracle"))
+	b.WriteString(theme.Header.Render("GasPriceOracle"))
 	if s.gpo != nil {
-		b.WriteString(rnfMutedStyle.Render(" (" + s.gpo.Address + ")"))
-		b.WriteString(rnfMutedStyle.Render(fmt.Sprintf("    latency: %dms", s.gpo.Latency.Milliseconds())))
+		b.WriteString(theme.Subtitle.Render(" (" + s.gpo.Address + ")"))
+		b.WriteString(theme.Subtitle.Render(fmt.Sprintf("    latency: %dms", s.gpo.Latency.Milliseconds())))
 	}
 	b.WriteString("\n")
 
 	if s.gpoLoading {
-		b.WriteString(rnfMutedStyle.Render("  loading ..."))
+		b.WriteString(theme.Subtitle.Render("  loading ..."))
 		b.WriteString("\n")
 		return b.String()
 	}
 	if s.gpoErr != nil {
-		b.WriteString(rnfErrStyle.Render(fmt.Sprintf("  ERR %v", s.gpoErr)))
+		b.WriteString(theme.ErrText.Render(fmt.Sprintf("  ERR %v", s.gpoErr)))
 		b.WriteString("\n")
 		if s.gpo == nil {
 			return b.String()
@@ -525,7 +512,7 @@ func (s readNetworkFeeScreen) renderGPOSection() string {
 	// the pinned literals and surface drift via the version() probe
 	// below. Values are padded to a uniform width so the trailing
 	// "(constant, pinned ...)" suffix lines up across rows.
-	pinnedSuffix := rnfMutedStyle.Render(fmt.Sprintf("  (constant, pinned to v%s)", snap.ConstantsSourceVersion))
+	pinnedSuffix := theme.Subtitle.Render(fmt.Sprintf("  (constant, pinned to v%s)", snap.ConstantsSourceVersion))
 	vCost := fmt.Sprintf("%d", snap.CostIntercept)
 	vCoef := fmt.Sprintf("%d", snap.CostFastlzCoef)
 	vMin := bigOrZero(snap.MinTransactionSize)
@@ -536,13 +523,13 @@ func (s readNetworkFeeScreen) renderGPOSection() string {
 	b.WriteString(formatStrRow("minTransactionSize", pad(vMin)+pinnedSuffix))
 	if e := snap.Errors["version"]; e != nil {
 		b.WriteString(formatStrRow("version",
-			rnfErrStyle.Render(fmt.Sprintf("ERR %v — drift undetectable", e))))
+			theme.ErrText.Render(fmt.Sprintf("ERR %v — drift undetectable", e))))
 	} else if snap.VersionMatches {
 		b.WriteString(formatStrRow("version",
-			snap.Version+rnfMutedStyle.Render(fmt.Sprintf("  (matches pinned v%s)", snap.ConstantsSourceVersion))))
+			snap.Version+theme.Subtitle.Render(fmt.Sprintf("  (matches pinned v%s)", snap.ConstantsSourceVersion))))
 	} else {
 		b.WriteString(formatStrRow("version",
-			rnfErrStyle.Render(fmt.Sprintf("%s (DRIFT: pinned to v%s — values may not match)",
+			theme.ErrText.Render(fmt.Sprintf("%s (DRIFT: pinned to v%s — values may not match)",
 				snap.Version, snap.ConstantsSourceVersion))))
 	}
 	return b.String()
@@ -554,21 +541,21 @@ func (s readNetworkFeeScreen) renderGPOSection() string {
 // subtitle so a format mismatch is debuggable at a glance.
 func (s readNetworkFeeScreen) renderBlockSection() string {
 	var b strings.Builder
-	b.WriteString(rnfHeaderStyle.Render("Block EIP-1559"))
+	b.WriteString(theme.Header.Render("Block EIP-1559"))
 	if s.blk != nil && s.blk.BlockNumber != nil {
-		b.WriteString(rnfMutedStyle.Render(fmt.Sprintf(" (block %s)", s.blk.BlockNumber)))
-		b.WriteString(rnfMutedStyle.Render(fmt.Sprintf("    latency: %dms", s.blk.Latency.Milliseconds())))
+		b.WriteString(theme.Subtitle.Render(fmt.Sprintf(" (block %s)", s.blk.BlockNumber)))
+		b.WriteString(theme.Subtitle.Render(fmt.Sprintf("    latency: %dms", s.blk.Latency.Milliseconds())))
 	}
 	b.WriteString("\n")
 
 	if s.blkLoading {
-		b.WriteString(rnfMutedStyle.Render("  loading ..."))
+		b.WriteString(theme.Subtitle.Render("  loading ..."))
 		b.WriteString("\n")
 		return b.String()
 	}
 	snap := s.blk
 	if snap == nil {
-		b.WriteString(rnfErrStyle.Render("  ERR no data"))
+		b.WriteString(theme.ErrText.Render("  ERR no data"))
 		b.WriteString("\n")
 		return b.String()
 	}
@@ -590,22 +577,22 @@ func (s readNetworkFeeScreen) renderBlockSection() string {
 
 func (s readNetworkFeeScreen) renderSysCfgSection() string {
 	var b strings.Builder
-	b.WriteString(rnfHeaderStyle.Render("SystemConfig"))
+	b.WriteString(theme.Header.Render("SystemConfig"))
 	if s.systemConfigAddr != "" {
-		b.WriteString(rnfMutedStyle.Render(" (" + s.systemConfigAddr + ")"))
+		b.WriteString(theme.Subtitle.Render(" (" + s.systemConfigAddr + ")"))
 	}
 	if s.sysCfg != nil {
-		b.WriteString(rnfMutedStyle.Render(fmt.Sprintf("    latency: %dms", s.sysCfg.Latency.Milliseconds())))
+		b.WriteString(theme.Subtitle.Render(fmt.Sprintf("    latency: %dms", s.sysCfg.Latency.Milliseconds())))
 	}
 	b.WriteString("\n")
 
 	if s.sysCfgLoading {
-		b.WriteString(rnfMutedStyle.Render("  loading ..."))
+		b.WriteString(theme.Subtitle.Render("  loading ..."))
 		b.WriteString("\n")
 		return b.String()
 	}
 	if s.sysCfgErr != nil {
-		b.WriteString(rnfErrStyle.Render(fmt.Sprintf("  ERR %v", s.sysCfgErr)))
+		b.WriteString(theme.ErrText.Render(fmt.Sprintf("  ERR %v", s.sysCfgErr)))
 		b.WriteString("\n")
 		if s.sysCfg == nil {
 			return b.String()
@@ -648,8 +635,8 @@ func formatU32Row(label string, v uint32, e error) string {
 		return formatErrRow(label, e)
 	}
 	return fmt.Sprintf("  %s  %s\n",
-		rnfLabelStyle.Render(padLabel(label)),
-		rnfValueStyle.Render(fmt.Sprintf("%d", v)),
+		theme.Label.Render(padLabel(label)),
+		theme.Value.Render(fmt.Sprintf("%d", v)),
 	)
 }
 
@@ -658,8 +645,8 @@ func formatU16Row(label string, v uint16, e error) string {
 		return formatErrRow(label, e)
 	}
 	return fmt.Sprintf("  %s  %s\n",
-		rnfLabelStyle.Render(padLabel(label)),
-		rnfValueStyle.Render(fmt.Sprintf("%d", v)),
+		theme.Label.Render(padLabel(label)),
+		theme.Value.Render(fmt.Sprintf("%d", v)),
 	)
 }
 
@@ -668,8 +655,8 @@ func formatU64Row(label string, v uint64, e error) string {
 		return formatErrRow(label, e)
 	}
 	return fmt.Sprintf("  %s  %s\n",
-		rnfLabelStyle.Render(padLabel(label)),
-		rnfValueStyle.Render(fmt.Sprintf("%d", v)),
+		theme.Label.Render(padLabel(label)),
+		theme.Value.Render(fmt.Sprintf("%d", v)),
 	)
 }
 
@@ -678,22 +665,22 @@ func formatBigRow(label string, v *big.Int, e error) string {
 		return formatErrRow(label, e)
 	}
 	return fmt.Sprintf("  %s  %s\n",
-		rnfLabelStyle.Render(padLabel(label)),
-		rnfValueStyle.Render(bigOrZero(v)),
+		theme.Label.Render(padLabel(label)),
+		theme.Value.Render(bigOrZero(v)),
 	)
 }
 
 func formatStrRow(label, value string) string {
 	return fmt.Sprintf("  %s  %s\n",
-		rnfLabelStyle.Render(padLabel(label)),
-		rnfValueStyle.Render(value),
+		theme.Label.Render(padLabel(label)),
+		theme.Value.Render(value),
 	)
 }
 
 func formatErrRow(label string, e error) string {
 	return fmt.Sprintf("  %s  %s\n",
-		rnfLabelStyle.Render(padLabel(label)),
-		rnfErrStyle.Render(fmt.Sprintf("ERR %v", e)),
+		theme.Label.Render(padLabel(label)),
+		theme.ErrText.Render(fmt.Sprintf("ERR %v", e)),
 	)
 }
 

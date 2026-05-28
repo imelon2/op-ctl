@@ -250,7 +250,7 @@ func TestStatusTxPoolScreen_FooterAppMode(t *testing.T) {
 	if !strings.Contains(app, "q back") {
 		t.Errorf("app-mode footer should contain 'q back', got:\n%s", app)
 	}
-	if !strings.Contains(app, "enter detail") {
-		t.Errorf("app-mode footer should advertise 'enter detail', got:\n%s", app)
+	if !strings.Contains(app, "⏎ detail") {
+		t.Errorf("app-mode footer should advertise '⏎ detail', got:\n%s", app)
 	}
 }

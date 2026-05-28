@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"op-ctl/internal/l1"
+	"op-ctl/internal/tui/theme"
 )
 
 // readDGDetailFetchedMsg carries one snapshot fan-out result back to
@@ -290,16 +291,16 @@ func (s readDisputeGameDetailScreen) clampRightOffset() readDisputeGameDetailScr
 // rows. With the L1↔summary divider added and the in-pane tab row
 // removed, the reserved chrome adds up to 10 lines:
 //
-//	 1. title / breadcrumb
-//	 2. L1 URL
-//	 3. ─── divider
-//	 4. version · l2ChainId · gameType
-//	 5. absolutePrestate
-//	 6. status · createdAt · resolvedAt
-//	 7. blank separator
-//	 8. pane top border
-//	 9. pane bottom border
-//	10. footer
+//  1. title / breadcrumb
+//  2. L1 URL
+//  3. ─── divider
+//  4. version · l2ChainId · gameType
+//  5. absolutePrestate
+//  6. status · createdAt · resolvedAt
+//  7. blank separator
+//  8. pane top border
+//  9. pane bottom border
+//  10. footer
 //
 // View() uses the returned value directly as the body slice length —
 // no extra subtraction because the panes no longer carry an internal
@@ -315,32 +316,21 @@ func (s readDisputeGameDetailScreen) viewportHeight() int {
 // --- styles ---
 
 var (
-	rdgDetailTitleStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	rdgDetailContextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	rdgDetailSectionStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	rdgDetailLabelStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	rdgDetailValueStyle   = lipgloss.NewStyle()
-	rdgDetailErrStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9"))
-	rdgDetailStatusInProg = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("11")) // yellow
-	rdgDetailStatusChall  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9"))  // red
-	rdgDetailStatusDef    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("10")) // green
-	rdgDetailHelpStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
-
 	// Both panes get a 4-sided NormalBorder; only BorderForeground
 	// changes between focused and idle states (set per-render in
 	// View). Inner Padding(0,1) keeps content from sitting flush
 	// against the border.
 	rdgDetailPaneBaseStyle = lipgloss.NewStyle().
 				BorderStyle(lipgloss.NormalBorder()).
-				BorderForeground(lipgloss.Color("240")).
+				BorderForeground(theme.ColorDim).
 				Padding(0, 1)
 
 	// Active-pane border color — the only visual cue for focus now
-	// that the tab markers are gone. Bright cyan (12) is the same
+	// that the tab markers are gone. The primary accent is the same
 	// hue used for selected list rows so the operator can build a
 	// consistent "this is interactive" vocabulary across screens.
-	rdgDetailPaneActiveBorderColor = lipgloss.Color("12")
-	rdgDetailPaneIdleBorderColor   = lipgloss.Color("240")
+	rdgDetailPaneActiveBorderColor = theme.ColorPrimary
+	rdgDetailPaneIdleBorderColor   = theme.ColorDim
 )
 
 // minLeftPanelWidth is the floor used before the first window-size
@@ -352,9 +342,9 @@ const minLeftPanelWidth = 30
 
 func (s readDisputeGameDetailScreen) View() string {
 	var b strings.Builder
-	b.WriteString(rdgDetailTitleStyle.Render(fmt.Sprintf("read / dispute-game / %s", s.gameAddr)))
+	b.WriteString(theme.Title.Render(fmt.Sprintf("read / dispute-game / %s", s.gameAddr)))
 	b.WriteString("\n")
-	b.WriteString(rdgDetailContextStyle.Render(fmt.Sprintf("L1: %s", s.l1RPCURL)))
+	b.WriteString(theme.Subtitle.Render(fmt.Sprintf("L1: %s", s.l1RPCURL)))
 	b.WriteString("\n")
 	b.WriteString(s.renderHeaderDivider())
 	b.WriteString("\n")
@@ -371,7 +361,7 @@ func (s readDisputeGameDetailScreen) View() string {
 	if s.focus == paneLeft {
 		focusLabel = "left"
 	}
-	footer := rdgDetailHelpStyle.Render(
+	footer := theme.Help.Render(
 		fmt.Sprintf("focus: %s · ← → switch · j/k ↑↓ scroll · ⏎/space toggle (right) · g/G first/last · PgDn/PgUp · r refresh · q back", focusLabel),
 	)
 
@@ -421,7 +411,7 @@ func (s readDisputeGameDetailScreen) View() string {
 const rdgDetailDividerWidth = 60
 
 func (s readDisputeGameDetailScreen) renderHeaderDivider() string {
-	return rdgDetailContextStyle.Render(strings.Repeat("─", rdgDetailDividerWidth))
+	return theme.Subtitle.Render(strings.Repeat("─", rdgDetailDividerWidth))
 }
 
 // renderHeaderSummary builds the "version · l2ChainId · gameType"
@@ -431,21 +421,21 @@ func (s readDisputeGameDetailScreen) renderHeaderDivider() string {
 // without scrolling the data pane.
 func (s readDisputeGameDetailScreen) renderHeaderSummary() string {
 	if s.loading || s.snap == nil {
-		return rdgDetailContextStyle.Render("⏳ loading identity ...")
+		return theme.Subtitle.Render("⏳ loading identity ...")
 	}
 	snap := s.snap
 	pill := func(label, value string, err error) string {
 		if err != nil {
-			return rdgDetailErrStyle.Render(label + " ERR " + err.Error())
+			return theme.ErrTitle.Render(label + " ERR " + err.Error())
 		}
-		return rdgDetailLabelStyle.Render(label+" ") + rdgDetailValueStyle.Render(value)
+		return theme.Label.Render(label+" ") + theme.Value.Render(value)
 	}
 	parts := []string{
 		pill("version", snap.Version, snap.Errors["version"]),
 		pill("l2ChainId", bigOrEmpty(snap.L2ChainID), snap.Errors["l2ChainId"]),
 		pill("gameType", fmt.Sprintf("%d %s", snap.GameType, gameTypeLabel(snap.GameType)), snap.Errors["gameData"]),
 	}
-	return strings.Join(parts, rdgDetailContextStyle.Render("  ·  "))
+	return strings.Join(parts, theme.Subtitle.Render("  ·  "))
 }
 
 // renderHeaderPrestate builds the "absolutePrestate 0x..." row of
@@ -458,9 +448,9 @@ func (s readDisputeGameDetailScreen) renderHeaderPrestate() string {
 	}
 	snap := s.snap
 	if e := snap.Errors["absolutePrestate"]; e != nil {
-		return rdgDetailErrStyle.Render("absolutePrestate ERR " + e.Error())
+		return theme.ErrTitle.Render("absolutePrestate ERR " + e.Error())
 	}
-	return rdgDetailLabelStyle.Render("absolutePrestate ") + rdgDetailValueStyle.Render(snap.AbsolutePrestate)
+	return theme.Label.Render("absolutePrestate ") + theme.Value.Render(snap.AbsolutePrestate)
 }
 
 // renderHeaderStatus builds the inline status row in the header:
@@ -478,7 +468,7 @@ func (s readDisputeGameDetailScreen) renderHeaderStatus() string {
 		headerTimePill("createdAt", snap.CreatedAt, snap.Errors["createdAt"]),
 		headerTimePill("resolvedAt", snap.ResolvedAt, snap.Errors["resolvedAt"]),
 	}
-	return strings.Join(parts, rdgDetailContextStyle.Render("  ·  "))
+	return strings.Join(parts, theme.Subtitle.Render("  ·  "))
 }
 
 // headerStatusPill renders the colored enum cell for the status
@@ -486,18 +476,18 @@ func (s readDisputeGameDetailScreen) renderHeaderStatus() string {
 // the operator's mental map carries between the two surfaces.
 func headerStatusPill(st l1.GameStatus, err error) string {
 	if err != nil {
-		return rdgDetailErrStyle.Render("status ERR " + err.Error())
+		return theme.ErrTitle.Render("status ERR " + err.Error())
 	}
-	style := rdgDetailValueStyle
+	style := theme.Value
 	switch st {
 	case l1.GameStatusInProgress:
-		style = rdgDetailStatusInProg
+		style = theme.WarnText.Bold(true)
 	case l1.GameStatusChallengerWins:
-		style = rdgDetailStatusChall
+		style = theme.ErrText.Bold(true)
 	case l1.GameStatusDefenderWins:
-		style = rdgDetailStatusDef
+		style = theme.OKText.Bold(true)
 	}
-	return rdgDetailLabelStyle.Render("status ") + style.Render(st.String())
+	return theme.Label.Render("status ") + style.Render(st.String())
 }
 
 // headerTimePill renders a `createdAt / resolvedAt` cell as a
@@ -505,13 +495,13 @@ func headerStatusPill(st l1.GameStatus, err error) string {
 // timestamp is zero (i.e. the chain hasn't recorded it yet).
 func headerTimePill(label string, unix uint64, err error) string {
 	if err != nil {
-		return rdgDetailErrStyle.Render(label + " ERR " + err.Error())
+		return theme.ErrTitle.Render(label + " ERR " + err.Error())
 	}
 	if unix == 0 {
-		return rdgDetailLabelStyle.Render(label+" ") + rdgDetailContextStyle.Render("—")
+		return theme.Label.Render(label+" ") + theme.Subtitle.Render("—")
 	}
 	t := time.Unix(int64(unix), 0).UTC()
-	return rdgDetailLabelStyle.Render(label+" ") + rdgDetailValueStyle.Render(t.Format("2006-01-02T15:04:05Z")+" ("+humanRelative(t)+")")
+	return theme.Label.Render(label+" ") + theme.Value.Render(t.Format("2006-01-02T15:04:05Z")+" ("+humanRelative(t)+")")
 }
 
 // sliceWithPad returns lines[off : off+avail] (clamped to the slice
@@ -636,13 +626,13 @@ func clampInt(n, lo, hi int) int {
 // dedicated right pane.
 func (s readDisputeGameDetailScreen) renderLeftPanel() string {
 	if s.loading {
-		return rdgDetailContextStyle.Render("⏳ fetching snapshot ...")
+		return theme.Subtitle.Render("⏳ fetching snapshot ...")
 	}
 	if s.hardErr != nil {
-		return rdgDetailErrStyle.Render(fmt.Sprintf("ERR fetching snapshot: %v", s.hardErr))
+		return theme.ErrTitle.Render(fmt.Sprintf("ERR fetching snapshot: %v", s.hardErr))
 	}
 	if s.snap == nil {
-		return rdgDetailErrStyle.Render("ERR no snapshot data")
+		return theme.ErrTitle.Render("ERR no snapshot data")
 	}
 
 	var b strings.Builder
@@ -682,7 +672,7 @@ func (s readDisputeGameDetailScreen) renderLeftPanel() string {
 	if s.claimsLatency > 0 {
 		latencies = append(latencies, fmt.Sprintf("claim %dms", s.claimsLatency.Milliseconds()))
 	}
-	b.WriteString(rdgDetailContextStyle.Render(strings.Join(latencies, " · ")))
+	b.WriteString(theme.Subtitle.Render(strings.Join(latencies, " · ")))
 
 	return b.String()
 }
@@ -694,14 +684,14 @@ func (s readDisputeGameDetailScreen) renderLeftPanel() string {
 func writeChildRow(b *strings.Builder, label, value string, err error) {
 	b.WriteString("    └─ ")
 	const childLabelW = labelW - 5 // account for the "  └─ " indent
-	b.WriteString(rdgDetailLabelStyle.Render(padRight(label, childLabelW)))
+	b.WriteString(theme.Label.Render(padRight(label, childLabelW)))
 	b.WriteString(" ")
 	if err != nil {
-		b.WriteString(rdgDetailErrStyle.Render(fmt.Sprintf("ERR %v", err)))
+		b.WriteString(theme.ErrTitle.Render(fmt.Sprintf("ERR %v", err)))
 	} else if value == "" {
-		b.WriteString(rdgDetailContextStyle.Render("—"))
+		b.WriteString(theme.Subtitle.Render("—"))
 	} else {
-		b.WriteString(rdgDetailValueStyle.Render(value))
+		b.WriteString(theme.Value.Render(value))
 	}
 	b.WriteString("\n")
 }
@@ -720,36 +710,36 @@ func (s readDisputeGameDetailScreen) renderRightPanel() (string, int) {
 	var b strings.Builder
 	cursorLine := -1
 
-	b.WriteString(rdgDetailSectionStyle.Render("Claim Data"))
+	b.WriteString(theme.Section.Render("Claim Data"))
 	b.WriteString("\n")
 
 	switch {
 	case s.snap == nil || s.snap.ClaimDataLen == nil:
 		if s.loading {
-			b.WriteString(rdgDetailContextStyle.Render("  (waiting for snapshot)"))
+			b.WriteString(theme.Subtitle.Render("  (waiting for snapshot)"))
 		} else if s.hardErr != nil {
-			b.WriteString(rdgDetailErrStyle.Render("  ERR snapshot unavailable"))
+			b.WriteString(theme.ErrTitle.Render("  ERR snapshot unavailable"))
 		} else {
-			b.WriteString(rdgDetailErrStyle.Render("  ERR claimDataLen unavailable"))
+			b.WriteString(theme.ErrTitle.Render("  ERR claimDataLen unavailable"))
 		}
 		b.WriteString("\n")
 		return b.String(), cursorLine
 	case s.snap.ClaimDataLen.Sign() == 0:
-		b.WriteString(rdgDetailContextStyle.Render("  (no claims submitted yet)"))
+		b.WriteString(theme.Subtitle.Render("  (no claims submitted yet)"))
 		b.WriteString("\n")
 		return b.String(), cursorLine
 	}
 
-	b.WriteString(rdgDetailContextStyle.Render(fmt.Sprintf("(%s entries · ⏎ toggle)", s.snap.ClaimDataLen.String())))
+	b.WriteString(theme.Subtitle.Render(fmt.Sprintf("(%s entries · ⏎ toggle)", s.snap.ClaimDataLen.String())))
 	b.WriteString("\n")
 
 	if s.claimsLoading {
-		b.WriteString(rdgDetailContextStyle.Render("⏳ fetching claimData[] + getChallengerDuration() ..."))
+		b.WriteString(theme.Subtitle.Render("⏳ fetching claimData[] + getChallengerDuration() ..."))
 		b.WriteString("\n")
 		return b.String(), cursorLine
 	}
 	if s.claimsHardErr != nil {
-		b.WriteString(rdgDetailErrStyle.Render(fmt.Sprintf("ERR loading claim data: %v", s.claimsHardErr)))
+		b.WriteString(theme.ErrTitle.Render(fmt.Sprintf("ERR loading claim data: %v", s.claimsHardErr)))
 		b.WriteString("\n")
 		return b.String(), cursorLine
 	}
@@ -773,9 +763,13 @@ func (s readDisputeGameDetailScreen) renderRightPanel() (string, int) {
 }
 
 // writeClaimSummary renders the single compact row for one claim:
-//   `▶ [i] 0xabcd…1234 · bond N · rem Nh`
+//
+//	`▶ [i] 0xabcd…1234 · bond N · rem Nh`
+//
 // or, when expanded:
-//   `▼ [i] 0xabcd…1234 · bond N · rem Nh`
+//
+//	`▼ [i] 0xabcd…1234 · bond N · rem Nh`
+//
 // The cursor row is fully-highlighted (background + bold) so it stays
 // visible alongside the left pane.
 func writeClaimSummary(b *strings.Builder, cd l1.ClaimData, err error, isCursor, isExpanded bool) {
@@ -877,12 +871,12 @@ func claimErrAt(errs []error, i int) error {
 
 func writeClaimField(b *strings.Builder, label, value string) {
 	b.WriteString("      ")
-	b.WriteString(rdgDetailLabelStyle.Render(padRight(label, 14)))
+	b.WriteString(theme.Label.Render(padRight(label, 14)))
 	b.WriteString(" ")
 	if value == "" {
-		b.WriteString(rdgDetailContextStyle.Render("—"))
+		b.WriteString(theme.Subtitle.Render("—"))
 	} else {
-		b.WriteString(rdgDetailValueStyle.Render(value))
+		b.WriteString(theme.Value.Render(value))
 	}
 	b.WriteString("\n")
 }
@@ -892,15 +886,15 @@ func writeClaimField(b *strings.Builder, label, value string) {
 // (>1h), amber = squeezed (<1h), red = expired.
 func writeClaimDurationField(b *strings.Builder, seconds uint64) {
 	b.WriteString("      ")
-	b.WriteString(rdgDetailLabelStyle.Render(padRight("remaining", 14)))
+	b.WriteString(theme.Label.Render(padRight("remaining", 14)))
 	b.WriteString(" ")
 	switch {
 	case seconds == 0:
-		b.WriteString(rdgDetailErrStyle.Render("expired (challenge clock = 0)"))
+		b.WriteString(theme.ErrTitle.Render("expired (challenge clock = 0)"))
 	case seconds < 3600:
-		b.WriteString(rdgDetailStatusInProg.Render(fmt.Sprintf("%ds (%s)", seconds, time.Duration(seconds)*time.Second)))
+		b.WriteString(theme.WarnText.Bold(true).Render(fmt.Sprintf("%ds (%s)", seconds, time.Duration(seconds)*time.Second)))
 	default:
-		b.WriteString(rdgDetailValueStyle.Render(fmt.Sprintf("%ds (%s)", seconds, time.Duration(seconds)*time.Second)))
+		b.WriteString(theme.Value.Render(fmt.Sprintf("%ds (%s)", seconds, time.Duration(seconds)*time.Second)))
 	}
 	b.WriteString("\n")
 }
@@ -929,7 +923,7 @@ func writeSection(b *strings.Builder, title string) {
 	if b.Len() > 0 {
 		b.WriteString("\n")
 	}
-	b.WriteString(rdgDetailSectionStyle.Render(title))
+	b.WriteString(theme.Section.Render(title))
 	b.WriteString("\n")
 }
 
@@ -937,14 +931,14 @@ const labelW = 24
 
 func writeRow(b *strings.Builder, label, value string, err error) {
 	b.WriteString("  ")
-	b.WriteString(rdgDetailLabelStyle.Render(padRight(label, labelW)))
+	b.WriteString(theme.Label.Render(padRight(label, labelW)))
 	b.WriteString(" ")
 	if err != nil {
-		b.WriteString(rdgDetailErrStyle.Render(fmt.Sprintf("ERR %v", err)))
+		b.WriteString(theme.ErrTitle.Render(fmt.Sprintf("ERR %v", err)))
 	} else if value == "" {
-		b.WriteString(rdgDetailContextStyle.Render("—"))
+		b.WriteString(theme.Subtitle.Render("—"))
 	} else {
-		b.WriteString(rdgDetailValueStyle.Render(value))
+		b.WriteString(theme.Value.Render(value))
 	}
 	b.WriteString("\n")
 }
@@ -963,21 +957,21 @@ func writeBoolRow(b *strings.Builder, label string, v bool, err error) {
 
 func writeStatusRow(b *strings.Builder, st l1.GameStatus, err error) {
 	b.WriteString("  ")
-	b.WriteString(rdgDetailLabelStyle.Render(padRight("status", labelW)))
+	b.WriteString(theme.Label.Render(padRight("status", labelW)))
 	b.WriteString(" ")
 	if err != nil {
-		b.WriteString(rdgDetailErrStyle.Render(fmt.Sprintf("ERR %v", err)))
+		b.WriteString(theme.ErrTitle.Render(fmt.Sprintf("ERR %v", err)))
 		b.WriteString("\n")
 		return
 	}
-	style := rdgDetailValueStyle
+	style := theme.Value
 	switch st {
 	case l1.GameStatusInProgress:
-		style = rdgDetailStatusInProg
+		style = theme.WarnText.Bold(true)
 	case l1.GameStatusChallengerWins:
-		style = rdgDetailStatusChall
+		style = theme.ErrText.Bold(true)
 	case l1.GameStatusDefenderWins:
-		style = rdgDetailStatusDef
+		style = theme.OKText.Bold(true)
 	}
 	b.WriteString(style.Render(st.String()))
 	b.WriteString("\n")

@@ -13,6 +13,7 @@ import (
 	"op-ctl/internal/config"
 	"op-ctl/internal/elnode"
 	"op-ctl/internal/sshtunnel"
+	"op-ctl/internal/tui/theme"
 )
 
 // statusTxPoolScreen drives `op-ctl status txpool`: every `interval`
@@ -213,23 +214,6 @@ func txpoolTick(interval time.Duration, nextGen uint64) tea.Cmd {
 	return tea.Tick(interval, func(time.Time) tea.Msg { return txpoolTickMsg{gen: nextGen} })
 }
 
-// ---------- styles ----------
-
-var (
-	txpTitleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	txpSubtitleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	txpHelpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
-
-	txpBackendStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14"))
-	txpLabelStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	txpValueStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
-	txpErrTextStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-	txpPendingStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
-	txpOKStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
-	txpCursorStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	txpSelectedBgStyle = lipgloss.NewStyle().Background(lipgloss.Color("237"))
-)
-
 const txpNameColW = 18
 
 // View renders one table: header row plus one row per backend showing
@@ -239,8 +223,8 @@ const txpNameColW = 18
 func (s statusTxPoolScreen) View() string {
 	var b strings.Builder
 
-	b.WriteString(txpTitleStyle.Render("status · txpool") + "  ")
-	b.WriteString(txpSubtitleStyle.Render(fmt.Sprintf(
+	b.WriteString(theme.Title.Render("status · txpool") + "  ")
+	b.WriteString(theme.Subtitle.Render(fmt.Sprintf(
 		"interval=%s  timeout=%s  backends=%d",
 		s.interval, s.timeout, len(s.backends),
 	)))
@@ -279,13 +263,13 @@ func (s statusTxPoolScreen) View() string {
 	// Header. Two extra leading spaces account for the per-row cursor
 	// gutter ("▸ " on the active row, "  " on inactive rows).
 	b.WriteString("    ")
-	b.WriteString(padTrunc(txpLabelStyle.Render("backend"), txpNameColW))
+	b.WriteString(padTrunc(theme.Label.Render("backend"), txpNameColW))
 	b.WriteString("  ")
-	b.WriteString(padTrunc(txpLabelStyle.Render("pending"), pendingW))
+	b.WriteString(padTrunc(theme.Label.Render("pending"), pendingW))
 	b.WriteString("  ")
-	b.WriteString(padTrunc(txpLabelStyle.Render("queued"), queuedW))
+	b.WriteString(padTrunc(theme.Label.Render("queued"), queuedW))
 	b.WriteString("  ")
-	b.WriteString(padTrunc(txpLabelStyle.Render("total"), totalW))
+	b.WriteString(padTrunc(theme.Label.Render("total"), totalW))
 	b.WriteString("\n")
 
 	// Rows. The cursor gutter is rendered before the row content; the
@@ -293,36 +277,36 @@ func (s statusTxPoolScreen) View() string {
 	// which backend `enter` will drill into.
 	for i, snap := range s.snapshots {
 		var row strings.Builder
-		name := txpBackendStyle.Render(s.backends[i].Name)
+		name := theme.Name.Render(s.backends[i].Name)
 		row.WriteString(padTrunc(name, txpNameColW))
 		switch {
 		case snap.pending:
 			row.WriteString("  ")
-			row.WriteString(txpPendingStyle.Render("polling…"))
+			row.WriteString(theme.Pending.Render("polling…"))
 		case snap.err != nil:
 			row.WriteString("  ")
-			row.WriteString(txpErrTextStyle.Render("ERR " + truncate(snap.err.Error(), 80)))
+			row.WriteString(theme.ErrText.Render("ERR " + truncate(snap.err.Error(), 80)))
 		case snap.status == nil:
 			row.WriteString("  ")
-			row.WriteString(txpErrTextStyle.Render("ERR (nil status)"))
+			row.WriteString(theme.ErrText.Render("ERR (nil status)"))
 		default:
 			row.WriteString("  ")
-			row.WriteString(padTrunc(txpValueStyle.Render(cells[i].pending), pendingW))
+			row.WriteString(padTrunc(theme.Value.Render(cells[i].pending), pendingW))
 			row.WriteString("  ")
-			row.WriteString(padTrunc(txpValueStyle.Render(cells[i].queued), queuedW))
+			row.WriteString(padTrunc(theme.Value.Render(cells[i].queued), queuedW))
 			row.WriteString("  ")
-			row.WriteString(padTrunc(txpValueStyle.Render(cells[i].total), totalW))
+			row.WriteString(padTrunc(theme.Value.Render(cells[i].total), totalW))
 			row.WriteString("  ")
-			row.WriteString(txpLabelStyle.Render(fmt.Sprintf("%dms", snap.latency/time.Millisecond)))
+			row.WriteString(theme.Label.Render(fmt.Sprintf("%dms", snap.latency/time.Millisecond)))
 			row.WriteString("  ")
-			row.WriteString(txpOKStyle.Render("✓"))
+			row.WriteString(theme.OKText.Render("✓"))
 		}
 
 		cursor := "  "
 		rowText := row.String()
 		if i == s.cursor {
-			cursor = txpCursorStyle.Render("▸ ")
-			rowText = txpSelectedBgStyle.Render(rowText)
+			cursor = theme.Cursor.Render("▸ ")
+			rowText = theme.SelectedRow.Render(rowText)
 		}
 		b.WriteString("  ")
 		b.WriteString(cursor)
@@ -332,10 +316,10 @@ func (s statusTxPoolScreen) View() string {
 
 	b.WriteString("\n")
 	if s.inApp {
-		b.WriteString(txpHelpStyle.Render(
-			"↑/↓ j/k navigate · enter detail · q back · live updates every " + s.interval.String()))
+		b.WriteString(theme.Footer(theme.KeyNav, theme.KeyOpenDetail, theme.KeyBack) +
+			theme.Help.Render(" · live updates every "+s.interval.String()))
 	} else {
-		b.WriteString(txpHelpStyle.Render("q quits · live updates every " + s.interval.String()))
+		b.WriteString(theme.Help.Render("q quits · live updates every " + s.interval.String()))
 	}
 	return b.String()
 }
