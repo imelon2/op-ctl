@@ -858,9 +858,9 @@ refresh = "nope"
 	}
 }
 
-func TestLoad_RPCAndContracts_RelativeStateRoot(t *testing.T) {
+func TestLoad_URLsAndContracts_RelativeStateRoot(t *testing.T) {
 	p := writeTemp(t, "config.toml", `
-[rpc]
+[urls]
 l1_rpc_url = "https://ethereum-sepolia-rpc.publicnode.com"
 l2_rpc_url = "http://3.39.212.0:8545"
 
@@ -874,11 +874,11 @@ consensus_rpc_url = "http://a:1"
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if got, want := c.RPC.L1RPCURL, "https://ethereum-sepolia-rpc.publicnode.com"; got != want {
-		t.Errorf("RPC.L1RPCURL: got %q, want %q", got, want)
+	if got, want := c.URLs.L1RPCURL, "https://ethereum-sepolia-rpc.publicnode.com"; got != want {
+		t.Errorf("URLs.L1RPCURL: got %q, want %q", got, want)
 	}
-	if got, want := c.RPC.L2RPCURL, "http://3.39.212.0:8545"; got != want {
-		t.Errorf("RPC.L2RPCURL: got %q, want %q", got, want)
+	if got, want := c.URLs.L2RPCURL, "http://3.39.212.0:8545"; got != want {
+		t.Errorf("URLs.L2RPCURL: got %q, want %q", got, want)
 	}
 	// Relative state_root is resolved against the directory of the config
 	// file (not the cwd), so the operator can invoke op-ctl from anywhere
@@ -907,7 +907,7 @@ consensus_rpc_url = "http://a:1"
 	}
 }
 
-func TestLoad_RPCAndContracts_AbsentLeavesZero(t *testing.T) {
+func TestLoad_URLsAndContracts_AbsentLeavesZero(t *testing.T) {
 	p := writeTemp(t, "config.toml", `
 [backends.sequencer]
 consensus_rpc_url = "http://a:1"
@@ -916,11 +916,11 @@ consensus_rpc_url = "http://a:1"
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if c.RPC.L1RPCURL != "" {
-		t.Errorf("absent l1_rpc_url should leave empty string, got %q", c.RPC.L1RPCURL)
+	if c.URLs.L1RPCURL != "" {
+		t.Errorf("absent l1_rpc_url should leave empty string, got %q", c.URLs.L1RPCURL)
 	}
-	if c.RPC.L2RPCURL != "" {
-		t.Errorf("absent l2_rpc_url should leave empty string, got %q", c.RPC.L2RPCURL)
+	if c.URLs.L2RPCURL != "" {
+		t.Errorf("absent l2_rpc_url should leave empty string, got %q", c.URLs.L2RPCURL)
 	}
 	if c.Contracts.StateRoot != "" {
 		t.Errorf("absent state_root should leave empty string, got %q", c.Contracts.StateRoot)
@@ -947,4 +947,178 @@ authorization = "Bearer x"
 	if len(names) != 1 || names[0] != "sequencer" {
 		t.Errorf("BackendList: got %v, want [sequencer]", names)
 	}
+}
+
+// TestLoad_URLsAccepted asserts the renamed [urls] section decodes
+// cleanly, including the etherscan_api_key field that joined L1/L2 RPC
+// URLs in the 2026-05 schema break.
+func TestLoad_URLsAccepted(t *testing.T) {
+	p := writeTemp(t, "config.toml", `
+[urls]
+l1_rpc_url = "https://l1.example"
+l2_rpc_url = "http://l2.example:8545"
+etherscan_api_key = "SOMEKEY"
+
+[backends.sequencer]
+consensus_rpc_url = "http://a:1"
+`)
+	c, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got, want := c.URLs.L1RPCURL, "https://l1.example"; got != want {
+		t.Errorf("URLs.L1RPCURL: got %q, want %q", got, want)
+	}
+	if got, want := c.URLs.L2RPCURL, "http://l2.example:8545"; got != want {
+		t.Errorf("URLs.L2RPCURL: got %q, want %q", got, want)
+	}
+	if got, want := c.URLs.EtherscanAPIKey, "SOMEKEY"; got != want {
+		t.Errorf("URLs.EtherscanAPIKey: got %q, want %q", got, want)
+	}
+}
+
+// TestLoad_RPCRejected pins the hard schema break: a legacy [rpc]
+// section must produce a clear Load() error instead of silently being
+// ignored (which would manifest as empty L1/L2 URLs at runtime — much
+// harder to debug).
+func TestLoad_RPCRejected(t *testing.T) {
+	p := writeTemp(t, "config.toml", `
+[rpc]
+l1_rpc_url = "https://l1.example"
+
+[backends.sequencer]
+consensus_rpc_url = "http://a:1"
+`)
+	_, err := Load(p)
+	if err == nil {
+		t.Fatal("expected error rejecting legacy [rpc] section")
+	}
+	if !strings.Contains(err.Error(), "legacy [rpc] section is no longer supported") {
+		t.Errorf("error should mention legacy [rpc]: %v", err)
+	}
+	if !strings.Contains(err.Error(), "rename to [urls]") {
+		t.Errorf("error should suggest rename: %v", err)
+	}
+}
+
+// TestLoad_BatchAddressValidation_BatcherFromAddress asserts a
+// malformed batcher_from_address surfaces at Load() time rather than
+// at the first Etherscan call.
+func TestLoad_BatchAddressValidation_BatcherFromAddress(t *testing.T) {
+	p := writeTemp(t, "config.toml", `
+[batch]
+batcher_from_address = "not-an-address"
+batch_inbox_to_address = "0x00B607c67e6662aC51C747961b657659BB47FD95"
+
+[backends.sequencer]
+consensus_rpc_url = "http://a:1"
+`)
+	_, err := Load(p)
+	if err == nil {
+		t.Fatal("expected error for invalid batcher_from_address")
+	}
+	if !strings.Contains(err.Error(), "batcher_from_address") {
+		t.Errorf("error should mention batcher_from_address: %v", err)
+	}
+}
+
+// TestLoad_BatchAddressValidation_BatchInboxToAddress mirrors the
+// batcher_from_address check for the inbox side.
+func TestLoad_BatchAddressValidation_BatchInboxToAddress(t *testing.T) {
+	p := writeTemp(t, "config.toml", `
+[batch]
+batcher_from_address = "0xdf05E8C9C0Ef7b85d2536182fa1E911622622542"
+batch_inbox_to_address = "0xnothex"
+
+[backends.sequencer]
+consensus_rpc_url = "http://a:1"
+`)
+	_, err := Load(p)
+	if err == nil {
+		t.Fatal("expected error for invalid batch_inbox_to_address")
+	}
+	if !strings.Contains(err.Error(), "batch_inbox_to_address") {
+		t.Errorf("error should mention batch_inbox_to_address: %v", err)
+	}
+}
+
+// TestLoad_BatchAddressValidation_BothValid asserts both addresses in
+// canonical form pass Load() without error and the parsed values are
+// preserved verbatim (case sensitivity is meaningful for EIP-55
+// checksums, so no case-folding here).
+func TestLoad_BatchAddressValidation_BothValid(t *testing.T) {
+	p := writeTemp(t, "config.toml", `
+[batch]
+batcher_from_address = "0xdf05E8C9C0Ef7b85d2536182fa1E911622622542"
+batch_inbox_to_address = "0x00B607c67e6662aC51C747961b657659BB47FD95"
+start_block = 10929965
+
+[backends.sequencer]
+consensus_rpc_url = "http://a:1"
+`)
+	c, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got, want := c.Batch.BatcherFromAddress, "0xdf05E8C9C0Ef7b85d2536182fa1E911622622542"; got != want {
+		t.Errorf("BatcherFromAddress: got %q, want %q", got, want)
+	}
+	if got, want := c.Batch.BatchInboxToAddress, "0x00B607c67e6662aC51C747961b657659BB47FD95"; got != want {
+		t.Errorf("BatchInboxToAddress: got %q, want %q", got, want)
+	}
+	if got, want := c.Batch.StartBlock, uint64(10929965); got != want {
+		t.Errorf("StartBlock: got %d, want %d", got, want)
+	}
+}
+
+// TestLoad_CacheTTLDefault covers the three TTL parse outcomes:
+// unset → 10m default; explicit positive → parsed; zero/negative →
+// load error. Mirrors the existing duration tests for namespace and
+// txpool timeouts.
+func TestLoad_CacheTTLDefault(t *testing.T) {
+	t.Run("unset_defaults_to_10m", func(t *testing.T) {
+		p := writeTemp(t, "config.toml", `
+[backends.sequencer]
+consensus_rpc_url = "http://a:1"
+`)
+		c, err := Load(p)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if got, want := c.Batch.CacheTTL, 10*time.Minute; got != want {
+			t.Errorf("CacheTTL default: got %v, want %v", got, want)
+		}
+	})
+	t.Run("explicit_5m", func(t *testing.T) {
+		p := writeTemp(t, "config.toml", `
+[batch]
+cache_ttl = "5m"
+
+[backends.sequencer]
+consensus_rpc_url = "http://a:1"
+`)
+		c, err := Load(p)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if got, want := c.Batch.CacheTTL, 5*time.Minute; got != want {
+			t.Errorf("CacheTTL: got %v, want %v", got, want)
+		}
+	})
+	t.Run("zero_rejected", func(t *testing.T) {
+		p := writeTemp(t, "config.toml", `
+[batch]
+cache_ttl = "0s"
+
+[backends.sequencer]
+consensus_rpc_url = "http://a:1"
+`)
+		_, err := Load(p)
+		if err == nil {
+			t.Fatal("expected error for zero cache_ttl")
+		}
+		if !strings.Contains(err.Error(), "cache_ttl must be positive") {
+			t.Errorf("error should mention positive requirement: %v", err)
+		}
+	})
 }

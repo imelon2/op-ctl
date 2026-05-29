@@ -226,9 +226,23 @@ func RunWithPicker(ctx context.Context, cobraRoot *cobra.Command, candidates []c
 // and does NOT spawn a second tea.NewProgram (the App already owns the
 // bubbletea loop), so two programs never contend for stdin/stdout.
 func RunStateBlock(ctx context.Context, cfg *config.Config, resolver *sshtunnel.Resolver, interval, timeout time.Duration) error {
-	screen := newStateBlockScreen(cfg.BackendList(), resolver, interval, timeout, cfg.Global.L2BlockTime)
+	screen := newStateBlockScreen(cfg.BackendList(), resolver, interval, timeout, resolveL2BlockTime(cfg))
 	_, err := tea.NewProgram(screen, tea.WithAltScreen(), tea.WithContext(ctx)).Run()
 	return err
+}
+
+// resolveL2BlockTime picks the L2 block cadence used by the status-block
+// indicator section. state.json's appliedIntent.globalDeployOverrides.l2BlockTime
+// is the source of truth (op-deployer wrote it at chain provision time);
+// config.toml's [global].l2_block_time remains as a manual override for
+// chains whose state.json predates the field. Zero is returned only when
+// neither source supplies a value — newStateBlockScreen handles that by
+// falling back to opnode.L2BlockSeconds().
+func resolveL2BlockTime(cfg *config.Config) time.Duration {
+	if d := contracts.LoadL2BlockTime(cfg.Contracts.StateRoot); d > 0 {
+		return d
+	}
+	return cfg.Global.L2BlockTime
 }
 
 // RunStatusTxPool launches the status-txpool alt-screen as a
@@ -294,14 +308,40 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case readGameSelectedMsg:
 		// Push the per-game detail screen seeded with the L1 RPC URL
 		// (carried on App) + the address the list screen highlighted.
-		if a.cfg == nil || a.cfg.RPC.L1RPCURL == "" {
-			return a.push(newErrScreen("config: [rpc].l1_rpc_url is not set")), nil
+		if a.cfg == nil || a.cfg.URLs.L1RPCURL == "" {
+			return a.push(newErrScreen("config: [urls].l1_rpc_url is not set")), nil
 		}
 		timeout := a.timeout
 		if timeout <= 0 {
 			timeout = 10 * time.Second
 		}
-		screen := newReadDisputeGameDetailScreen(a.cfg.RPC.L1RPCURL, m.address, timeout)
+		screen := newReadDisputeGameDetailScreen(a.cfg.URLs.L1RPCURL, m.address, timeout)
+		a = a.push(screen)
+		return a, screen.Init()
+	case batchPrefetchedMsg:
+		// Cache + (optional) Etherscan sync resolved. Drop the
+		// loading screen first so a pop from the result screen
+		// returns to the menu rather than the loading spinner.
+		a = popLoading(a)
+		if m.err != nil {
+			if m.store != nil {
+				_ = m.store.Close()
+			}
+			return a.push(newErrScreen(m.err.Error())), nil
+		}
+		screen := newReadBatchScreen(m.store)
+		a = a.push(screen)
+		return a, screen.Init()
+	case readBatchTxSelectedMsg:
+		// The list screen owns the *batchcache.Store and stays on
+		// the stack underneath. The detail screen reuses the same
+		// store handle for its store.Get lookup — no second prefetch.
+		top := a.stack[len(a.stack)-1]
+		listScreen, ok := top.(readBatchScreen)
+		if !ok {
+			return a, nil
+		}
+		screen := newReadBatchDetailScreen(listScreen.store, m.txHash)
 		a = a.push(screen)
 		return a, screen.Init()
 	}
@@ -419,7 +459,7 @@ func (a App) handleCmdSelected(name string) (App, tea.Cmd) {
 		if timeout <= 0 {
 			timeout = a.timeout
 		}
-		screen := newStateBlockScreen(bs, a.resolver, interval, timeout, a.cfg.Global.L2BlockTime)
+		screen := newStateBlockScreen(bs, a.resolver, interval, timeout, resolveL2BlockTime(a.cfg))
 		a = a.push(screen)
 		return a, screen.Init()
 	case "dispute-game":
@@ -427,8 +467,8 @@ func (a App) handleCmdSelected(name string) (App, tea.Cmd) {
 		if target.Parent() == nil || target.Parent().Name() != "read" {
 			return a, nil
 		}
-		if a.cfg.RPC.L1RPCURL == "" {
-			return a.push(newErrScreen("config: [rpc].l1_rpc_url is not set")), nil
+		if a.cfg.URLs.L1RPCURL == "" {
+			return a.push(newErrScreen("config: [urls].l1_rpc_url is not set")), nil
 		}
 		addrs, err := contracts.Load(a.cfg.Contracts.StateRoot)
 		if err != nil {
@@ -438,7 +478,7 @@ func (a App) handleCmdSelected(name string) (App, tea.Cmd) {
 		if timeout <= 0 {
 			timeout = 10 * time.Second
 		}
-		screen := newReadDisputeGameScreen(a.cfg.RPC.L1RPCURL, addrs.DisputeGameFactoryProxy, timeout)
+		screen := newReadDisputeGameScreen(a.cfg.URLs.L1RPCURL, addrs.DisputeGameFactoryProxy, timeout)
 		a = a.push(screen)
 		return a, screen.Init()
 	case "network-fee":
@@ -446,8 +486,8 @@ func (a App) handleCmdSelected(name string) (App, tea.Cmd) {
 		if target.Parent() == nil || target.Parent().Name() != "read" {
 			return a, nil
 		}
-		if a.cfg.RPC.L1RPCURL == "" {
-			return a.push(newErrScreen("config: [rpc].l1_rpc_url is not set")), nil
+		if a.cfg.URLs.L1RPCURL == "" {
+			return a.push(newErrScreen("config: [urls].l1_rpc_url is not set")), nil
 		}
 		// state.json may pre-date the SystemConfigProxy field — the
 		// screen surfaces a per-section ERR for that case rather than
@@ -461,9 +501,21 @@ func (a App) handleCmdSelected(name string) (App, tea.Cmd) {
 		if timeout <= 0 {
 			timeout = 10 * time.Second
 		}
-		screen := newReadNetworkFeeScreen(a.cfg.RPC.L1RPCURL, a.cfg.RPC.L2RPCURL, addrs.SystemConfigProxy, timeout)
+		screen := newReadNetworkFeeScreen(a.cfg.URLs.L1RPCURL, a.cfg.URLs.L2RPCURL, addrs.SystemConfigProxy, timeout)
 		a = a.push(screen)
 		return a, screen.Init()
+	case "batch":
+		// Disambiguate by parent: `batch` only belongs under `read`.
+		if target.Parent() == nil || target.Parent().Name() != "read" {
+			return a, nil
+		}
+		// Prefetch happens off the bubbletea event loop so the TUI
+		// stays responsive even when Etherscan is paginated for many
+		// seconds on the first sync. The loadingScreen pattern is the
+		// established precedent (see backendSelected branches above
+		// at app.go:508-515).
+		a = a.push(newLoadingScreen("checking cache + Etherscan ..."))
+		return a, runBatchPrefetchCmd(a.cfg, a.timeout)
 	case "txpool":
 		// Disambiguate by parent: `txpool` only belongs under `status`.
 		if target.Parent() == nil || target.Parent().Name() != "status" {

@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"op-ctl/internal/l1"
+	"op-ctl/internal/tui/keymap"
 	"op-ctl/internal/tui/theme"
 )
 
@@ -176,9 +177,11 @@ func (s readDisputeGameDetailScreen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return s, nil
 	case tea.KeyMsg:
 		k := m.String()
-		switch k {
-		case "q", "esc", "ctrl+c":
+		switch {
+		case keymap.Back.Matches(m), k == "ctrl+c":
 			return s, func() tea.Msg { return popMsg{} }
+		}
+		switch k {
 		case "left", "h":
 			s.focus = paneLeft
 		case "right", "l":

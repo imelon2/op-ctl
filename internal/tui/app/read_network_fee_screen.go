@@ -12,6 +12,7 @@ import (
 
 	"op-ctl/internal/l1"
 	"op-ctl/internal/l2"
+	"op-ctl/internal/tui/keymap"
 	"op-ctl/internal/tui/theme"
 )
 
@@ -178,49 +179,12 @@ type readNetworkFeeScreen struct {
 	offset int
 
 	// unit controls how the Live section's wei amounts (Gas Oracle +
-	// FeeVaults) are rendered; cycled with 'u'. Config values are not
-	// affected (they are scalars/counts, not wei).
-	unit feeUnit
+	// FeeVaults) are rendered; cycled with `u`. The shared cycler
+	// lives in internal/tui/keymap so every screen showing wei
+	// values uses the same wei/gwei/eth display.
+	unit keymap.FeeUnit
 
 	width, height int
-}
-
-// feeUnit selects the display unit for wei-denominated values in the
-// Live section. The zero value is wei, so a freshly pushed screen shows
-// raw wei until the operator presses 'u'.
-type feeUnit int
-
-const (
-	unitWei feeUnit = iota
-	unitGwei
-	unitEth
-)
-
-func (u feeUnit) String() string {
-	switch u {
-	case unitGwei:
-		return "gwei"
-	case unitEth:
-		return "eth"
-	default:
-		return "wei"
-	}
-}
-
-// next cycles wei → gwei → eth → wei.
-func (u feeUnit) next() feeUnit { return (u + 1) % 3 }
-
-// decimals is how many places to shift the wei value right for this
-// unit (0 = wei, 9 = gwei, 18 = eth).
-func (u feeUnit) decimals() int {
-	switch u {
-	case unitGwei:
-		return 9
-	case unitEth:
-		return 18
-	default:
-		return 0
-	}
 }
 
 func newReadNetworkFeeScreen(l1RPCURL, l2RPCURL, systemConfigAddr string, timeout time.Duration) readNetworkFeeScreen {
@@ -405,34 +369,33 @@ func (s readNetworkFeeScreen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		s.gas = m.snap
 
 	case tea.KeyMsg:
-		switch m.String() {
-		case "q", "esc":
+		switch {
+		case keymap.Back.Matches(m):
 			return s, func() tea.Msg { return popMsg{} }
-		case "ctrl+c":
+		case m.String() == "ctrl+c":
 			return s, tea.Quit
-		case "u":
-			// Cycle the Live section's display unit: wei → gwei → eth.
-			s.unit = s.unit.next()
+		case keymap.UnitCycle.Matches(m):
+			s.unit = s.unit.Next()
 			return s, nil
-		case "j", "down":
+		case keymap.Down.Matches(m):
 			s.offset++
 			return s.clampOffset(), nil
-		case "k", "up":
+		case keymap.Up.Matches(m):
 			s.offset--
 			return s.clampOffset(), nil
-		case "g", "home":
+		case keymap.Top.Matches(m):
 			s.offset = 0
 			return s, nil
-		case "G", "end":
+		case keymap.Bottom.Matches(m):
 			s.offset = s.maxScrollOffset()
 			return s, nil
-		case "pgdown", "ctrl+d", " ":
+		case keymap.PageNext.Matches(m):
 			s.offset += halfPage(s.height)
 			return s.clampOffset(), nil
-		case "pgup", "ctrl+u", "b":
+		case keymap.PagePrev.Matches(m):
 			s.offset -= halfPage(s.height)
 			return s.clampOffset(), nil
-		case "r":
+		case keymap.Refresh.Matches(m):
 			// Manual refresh: re-fire the one-shot SystemConfig +
 			// GasPriceOracle + latest block fetches AND restart the vault
 			// tick chain by issuing the next expected gen immediately. The
@@ -494,7 +457,7 @@ func (s readNetworkFeeScreen) renderBody() string {
 
 func (s readNetworkFeeScreen) View() string {
 	header := s.renderHeader()
-	footer := theme.Footer(theme.KeyScroll, theme.KeyTopBottom, theme.Key{Keys: "u", Desc: "unit"}, theme.KeyRefresh, theme.KeyBack) +
+	footer := keymap.Footer(keymap.Scroll, keymap.Top, keymap.Bottom, keymap.UnitCycle, keymap.Refresh, keymap.Back) +
 		theme.Help.Render(fmt.Sprintf(" · auto %s", vaultRefreshInterval))
 	body := s.renderBody()
 
@@ -668,11 +631,7 @@ func (s readNetworkFeeScreen) formatFee(v *big.Int) string {
 	if v == nil {
 		return "0"
 	}
-	d := s.unit.decimals()
-	if d == 0 {
-		return v.String()
-	}
-	return scaleDecimal(v, d)
+	return s.unit.Format(v)
 }
 
 // feeOrErr is the FeeVaults-table value formatter: the unit-aware amount,
@@ -684,28 +643,6 @@ func (s readNetworkFeeScreen) feeOrErr(v *big.Int, e error) string {
 	return s.formatFee(v)
 }
 
-// scaleDecimal divides v by 10^decimals and renders the quotient with a
-// trailing-zero-trimmed fractional part (e.g. 1_000_000 wei at 9 →
-// "0.001"). Sign-aware, though Live fee values are non-negative.
-func scaleDecimal(v *big.Int, decimals int) string {
-	abs := new(big.Int).Abs(v)
-	div := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(decimals)), nil)
-	q := new(big.Int)
-	r := new(big.Int)
-	q.QuoRem(abs, div, r)
-	out := q.String()
-	if r.Sign() != 0 {
-		frac := r.String()
-		if pad := decimals - len(frac); pad > 0 {
-			frac = strings.Repeat("0", pad) + frac
-		}
-		out += "." + strings.TrimRight(frac, "0")
-	}
-	if v.Sign() < 0 {
-		out = "-" + out
-	}
-	return out
-}
 
 func (s readNetworkFeeScreen) renderVaultsSection() string {
 	var b strings.Builder

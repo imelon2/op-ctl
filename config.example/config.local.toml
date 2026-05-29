@@ -2,16 +2,37 @@
 namespace_timeout = "30s"
 namespace_retry   = 3
 # L2 block production time. Used by `op-ctl status block` to translate
-# L2 lag block counts into human-readable durations. Defaults to 2s
-# (op-stack default) when unset.
+# L2 lag block counts into human-readable durations.
+#
+# Precedence (first non-zero wins):
+#   1. state.json → appliedIntent.globalDeployOverrides.l2BlockTime
+#   2. this key (manual override for chains whose state.json predates the field)
+#   3. 2s (op-stack default)
 l2_block_time = "1s"
 
-# [rpc] is consumed by the `op-ctl read` subcommands. l1_rpc_url drives
-# L1 view calls (dispute-game, network-fee→SystemConfig); l2_rpc_url
-# drives L2 view calls (network-fee→FeeVault predeploys).
-[rpc]
+# [urls] is consumed by the `op-ctl read` subcommands. l1_rpc_url
+# drives L1 view calls (dispute-game, network-fee→SystemConfig);
+# l2_rpc_url drives L2 view calls (network-fee→FeeVault predeploys);
+# etherscan_api_key authenticates the Etherscan V2 multi-chain API
+# called by `op-ctl read batch` (leave empty if read batch is unused).
+#
+# The section was renamed from [rpc] in 2026-05; legacy [rpc] is
+# rejected at Load() with a clear message — there is no silent alias.
+[urls]
 l1_rpc_url = "https://ethereum-sepolia-rpc.publicnode.com"
 l2_rpc_url = "http://127.0.0.1:8545"
+etherscan_api_key = ""
+
+# [batch] is consumed by `op-ctl read batch`. The two addresses
+# scope the L1 transactions counted as batches. start_block bounds
+# the very first incremental sync (subsequent runs resume from
+# MAX(block_number)+1 in the SQLite cache). cache_ttl gates how
+# often Etherscan is re-paginated.
+[batch]
+batcher_from_address  = "0x0000000000000000000000000000000000000000"
+batch_inbox_to_address = "0x0000000000000000000000000000000000000000"
+start_block = 0
+cache_ttl   = "10m"
 
 # [contracts].state_root points at the op-deployer state.json that
 # holds this chain's L1 contract addresses (DisputeGameFactoryProxy,

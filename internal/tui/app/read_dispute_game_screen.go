@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss/table"
 
 	"op-ctl/internal/l1"
+	"op-ctl/internal/tui/keymap"
 	"op-ctl/internal/tui/theme"
 )
 
@@ -244,38 +245,38 @@ func (s readDisputeGameScreen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (s readDisputeGameScreen) handleKey(m tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch m.String() {
-	case "q", "esc", "ctrl+c":
+	switch {
+	case keymap.Back.Matches(m), m.String() == "ctrl+c":
 		return s, func() tea.Msg { return popMsg{} }
-	case "j", "down":
+	case keymap.Down.Matches(m):
 		if s.cursor < len(s.pageRows)-1 {
 			s.cursor++
 		}
 		return s, nil
-	case "k", "up":
+	case keymap.Up.Matches(m):
 		if s.cursor > 0 {
 			s.cursor--
 		}
 		return s, nil
-	case "g", "home":
+	case keymap.Top.Matches(m):
 		s.cursor = 0
 		return s, nil
-	case "G", "end":
+	case keymap.Bottom.Matches(m):
 		if len(s.pageRows) > 0 {
 			s.cursor = len(s.pageRows) - 1
 		}
 		return s, nil
-	case "pgdown", "right", "l":
+	case keymap.PageNext.Matches(m), m.String() == "right", m.String() == "l":
 		return s.advancePage(1)
-	case "pgup", "left", "h":
+	case keymap.PagePrev.Matches(m), m.String() == "left", m.String() == "h":
 		return s.advancePage(-1)
-	case "r":
+	case keymap.Refresh.Matches(m):
 		if !s.pageLoading {
 			s.pageLoading = true
 			s.pageGen++
 			return s, fetchReadDGPageCmd(s.l1RPCURL, s.factoryAddr, s.timeout, s.count, s.page, s.pageGen)
 		}
-	case "enter":
+	case keymap.Enter.Matches(m):
 		if s.cursor < len(s.pageRows) {
 			row := s.pageRows[s.cursor]
 			if row.Proxy != "" {
@@ -372,7 +373,10 @@ func (s readDisputeGameScreen) View() string {
 	}
 	b.WriteString(theme.Subtitle.Render(pageInfo))
 	b.WriteString("\n")
-	b.WriteString(theme.Help.Render("↑↓ select · ⏎ open · PgDn/→ next · PgUp/← prev · g/G top/bottom · r refresh · q back"))
+	b.WriteString(keymap.Footer(
+		keymap.Navigate, keymap.Enter, keymap.PageNext, keymap.PagePrev,
+		keymap.Top, keymap.Bottom, keymap.Refresh, keymap.Back,
+	))
 
 	return b.String()
 }

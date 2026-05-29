@@ -4,6 +4,10 @@ Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-s
 
 **Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
 
+## Project references
+
+- **TUI 인터렉티브 키 (`r` refresh, `t` time, `u` unit 등)** — `internal/tui/keymap` 패키지를 사용하고, [docs/tui-interactive-keys.md](docs/tui-interactive-keys.md)를 먼저 읽으세요. 표준 바인딩과 cycle 상태 타입(TimeMode, FeeUnit)이 거기에 정의되어 있습니다.
+
 ## 1. Think Before Coding
 
 **Don't assume. Don't hide confusion. Surface tradeoffs.**
@@ -63,5 +67,3 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
-
-대답은 한국어로 할것

@@ -60,7 +60,7 @@ var readNetworkFeeCmd = &cobra.Command{
 
 		return runReadNetworkFeePlain(
 			ctx, cmd.OutOrStdout(),
-			cfg.RPC.L1RPCURL, cfg.RPC.L2RPCURL,
+			cfg.URLs.L1RPCURL, cfg.URLs.L2RPCURL,
 			addrs.SystemConfigProxy,
 			timeoutEff,
 		)

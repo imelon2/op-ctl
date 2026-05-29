@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"op-ctl/internal/config"
+	"op-ctl/internal/contracts"
 	"op-ctl/internal/opnode"
 	"op-ctl/internal/sshtunnel"
 	"op-ctl/internal/tui/app"
@@ -84,7 +85,16 @@ var stateBlockCmd = &cobra.Command{
 		resolver := buildResolver(cfg)
 		defer closeResolver(resolver)
 
-		l2BlockTime := cfg.Global.L2BlockTime
+		// L2 block cadence resolution: state.json's
+		// appliedIntent.globalDeployOverrides.l2BlockTime is the source
+		// of truth because op-deployer writes it when the chain was
+		// provisioned. config.toml's [global].l2_block_time remains as
+		// a manual override for chains whose state.json doesn't carry
+		// the field; opnode.L2BlockSeconds() is the final fallback.
+		l2BlockTime := contracts.LoadL2BlockTime(cfg.Contracts.StateRoot)
+		if l2BlockTime <= 0 {
+			l2BlockTime = cfg.Global.L2BlockTime
+		}
 		if l2BlockTime <= 0 {
 			l2BlockTime = opnode.L2BlockSeconds()
 		}

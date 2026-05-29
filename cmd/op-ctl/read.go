@@ -75,14 +75,14 @@ var readDisputeGameCmd = &cobra.Command{
 		if readDisputeGamePlain {
 			out := cmd.OutOrStdout()
 			if readDisputeGameAddress != "" {
-				return runReadDisputeGamePlainDetail(ctx, out, cfg.RPC.L1RPCURL, readDisputeGameAddress, timeoutEff)
+				return runReadDisputeGamePlainDetail(ctx, out, cfg.URLs.L1RPCURL, readDisputeGameAddress, timeoutEff)
 			}
-			return runReadDisputeGamePlainList(ctx, out, cfg.RPC.L1RPCURL, addrs.DisputeGameFactoryProxy, timeoutEff)
+			return runReadDisputeGamePlainList(ctx, out, cfg.URLs.L1RPCURL, addrs.DisputeGameFactoryProxy, timeoutEff)
 		}
 		if readDisputeGameAddress != "" {
-			return app.RunReadDisputeGameDetail(ctx, cfg.RPC.L1RPCURL, readDisputeGameAddress, timeoutEff)
+			return app.RunReadDisputeGameDetail(ctx, cfg.URLs.L1RPCURL, readDisputeGameAddress, timeoutEff)
 		}
-		return app.RunReadDisputeGame(ctx, cfg.RPC.L1RPCURL, addrs.DisputeGameFactoryProxy, timeoutEff)
+		return app.RunReadDisputeGame(ctx, cfg.URLs.L1RPCURL, addrs.DisputeGameFactoryProxy, timeoutEff)
 	},
 }
 

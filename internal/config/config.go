@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -31,6 +32,12 @@ var WarningWriter io.Writer = os.Stderr
 // without touching the kevinburke/ssh_config global cache, which would
 // otherwise leak state between tests in the same process.
 var SSHConfigGet = sshconfig.Get
+
+// ethAddressRe matches an Ethereum address — 0x prefix + 40 hex digits.
+// Used to validate the addresses under [batch] at Load() time so an
+// operator typo surfaces immediately rather than during the first
+// Etherscan call from `op-ctl read batch`.
+var ethAddressRe = regexp.MustCompile(`^0x[0-9a-fA-F]{40}$`)
 
 // Backend models a single [backends.<name>] table.
 //
@@ -88,7 +95,8 @@ type Bastion struct {
 // unordered.
 type Config struct {
 	Global    GlobalConfig       `toml:"global"`
-	RPC       RPCConfig          `toml:"rpc"`
+	URLs      URLsConfig         `toml:"urls"`
+	Batch     BatchConfig        `toml:"batch"`
 	Contracts ContractsConfig    `toml:"contracts"`
 	Backends  map[string]Backend `toml:"backends"`
 	Bastions  map[string]Bastion `toml:"bastions"`
@@ -98,18 +106,46 @@ type Config struct {
 	path     string
 }
 
-// RPCConfig holds RPC endpoints op-ctl reads from.
+// URLsConfig holds the off-chain endpoints op-ctl reads from.
 //
 // L1RPCURL is the settlement-layer endpoint used for view calls on L1
 // contracts (DisputeGameFactoryProxy, SystemConfigProxy, ...). L2RPCURL
 // targets the L2 EL node for view calls on L2 predeploys (BaseFeeVault,
 // SequencerFeeVault, ...) and for eth_getBalance on those vaults.
 //
-// op-ctl is L2-paychain centric so this is strictly read-only access on
-// both sides (no signing keys, no transaction submission).
-type RPCConfig struct {
-	L1RPCURL string `toml:"l1_rpc_url"`
-	L2RPCURL string `toml:"l2_rpc_url"`
+// EtherscanAPIKey authenticates the Etherscan V2 multi-chain API consumed
+// by `op-ctl read batch`. The base URL is a package constant inside the
+// etherscan client; only the key is configurable. Empty string is allowed
+// at Load() so cache-only workflows still load — `read batch` checks at
+// execution time and returns a clear error.
+//
+// op-ctl is L2-paychain centric so this is strictly read-only access
+// (no signing keys, no transaction submission). The section was renamed
+// from [rpc] in the 2026-05 schema break; legacy [rpc] is rejected by
+// Load() with a clear message — there is no silent alias.
+type URLsConfig struct {
+	L1RPCURL        string `toml:"l1_rpc_url"`
+	L2RPCURL        string `toml:"l2_rpc_url"`
+	EtherscanAPIKey string `toml:"etherscan_api_key"`
+}
+
+// BatchConfig holds the [batch] table consumed by `op-ctl read batch`.
+//
+// BatcherFromAddress is the L1 EOA that submits the chain's batch
+// transactions (kept here primarily for reference / future filtering).
+// BatchInboxToAddress is the L1 contract receiving those batches and is
+// the actual `address` query parameter passed to Etherscan V2 txlist.
+// StartBlock is the L1 block height the first incremental sync resumes
+// from when the cache is empty.
+// CacheTTL gates re-fetch: if `time.Since(meta.last_synced_at) >= CacheTTL`
+// the prefetcher pages Etherscan from MAX(block_number)+1.
+type BatchConfig struct {
+	BatcherFromAddress  string `toml:"batcher_from_address"`
+	BatchInboxToAddress string `toml:"batch_inbox_to_address"`
+	StartBlock          uint64 `toml:"start_block"`
+	CacheTTLRaw         string `toml:"cache_ttl"`
+
+	CacheTTL time.Duration `toml:"-"`
 }
 
 // ContractsConfig points at the on-disk state.json (op-deployer output)
@@ -203,6 +239,20 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("config: decode %s: %w", path, err)
 	}
 	c.path = path
+
+	// Hard schema break (2026-05): the [rpc] section was renamed to
+	// [urls] when etherscan_api_key joined L1/L2 RPC URLs. No silent
+	// alias — a legacy config is rejected here so the operator sees
+	// the rename instead of an empty URLsConfig at runtime.
+	for _, k := range md.Keys() {
+		if len(k) >= 1 && k[0] == "rpc" {
+			return nil, fmt.Errorf(
+				"config: %s: legacy [rpc] section is no longer supported; rename to [urls] "+
+					"(add etherscan_api_key alongside l1_rpc_url / l2_rpc_url)",
+				path,
+			)
+		}
+	}
 
 	seen := map[string]bool{}
 	for _, k := range md.Keys() {
@@ -398,7 +448,60 @@ func Load(path string) (*Config, error) {
 		c.State.TxPool.Detail.Refresh = d
 	}
 
+	if err := c.finalizeBatch(path); err != nil {
+		return nil, err
+	}
+
 	return &c, nil
+}
+
+// finalizeBatch validates the [batch] block (address shape, cache_ttl
+// duration) and applies the 10m default when cache_ttl is unset.
+//
+// The two addresses are non-required at Load() — operators on chains
+// that do not use `op-ctl read batch` should still be able to load
+// their config. When present, they must match the canonical 0x + 40
+// hex form so a typo doesn't silently become an empty Etherscan call.
+// Empty addresses are tolerated here; `op-ctl read batch` surfaces a
+// clear "address not configured" error at execution time.
+func (c *Config) finalizeBatch(path string) error {
+	if addr := strings.TrimSpace(c.Batch.BatcherFromAddress); addr != "" && !ethAddressRe.MatchString(addr) {
+		return fmt.Errorf(
+			"config: %s: batch.batcher_from_address %q is not a valid 0x + 40 hex address",
+			path, addr,
+		)
+	}
+	if addr := strings.TrimSpace(c.Batch.BatchInboxToAddress); addr != "" && !ethAddressRe.MatchString(addr) {
+		return fmt.Errorf(
+			"config: %s: batch.batch_inbox_to_address %q is not a valid 0x + 40 hex address",
+			path, addr,
+		)
+	}
+
+	// cache_ttl:
+	//   unset       → 10 minute default (matches the spec recommendation).
+	//   "0s" or neg → error (a zero/negative TTL would either disable the
+	//                cache entirely or cause an immediate re-fetch loop —
+	//                both are operator mistakes, not configurations).
+	if raw := strings.TrimSpace(c.Batch.CacheTTLRaw); raw == "" {
+		c.Batch.CacheTTL = 10 * time.Minute
+	} else {
+		d, err := time.ParseDuration(raw)
+		if err != nil {
+			return fmt.Errorf(
+				"config: %s: batch.cache_ttl %q is not a valid duration: %w",
+				path, raw, err,
+			)
+		}
+		if d <= 0 {
+			return fmt.Errorf(
+				"config: %s: batch.cache_ttl must be positive, got %q",
+				path, raw,
+			)
+		}
+		c.Batch.CacheTTL = d
+	}
+	return nil
 }
 
 // finalizeBastions injects map-key into Name, applies defaults
